@@ -24,11 +24,11 @@ http://ovh1.p2pd.net:8000/servers
 
 The software can be installed directly from this repo
 
-python3 -m pip install -e .
+**python3 -m pip install -e .**
 
 Or (soon when its done) from pip
 
-python3 -m pip install dogdorm
+**python3 -m pip install dogdorm**
 
 # Workers
 
@@ -52,11 +52,11 @@ This is a long way to say that: I simply start 100 Python processes to do
 all my networking work. The work doesn't do anything complex like try to
 "concurrently" execute multiple work tasks at once. Instead, the work is done
 sequently, and the result sent back to the dealer. The memory cost of doing
-the workers is a lot... 4.5 GB for all processes, but the advantage
-is simple parallelism, vertical scaling, and being able to run any
-coroutine that might otherwise be poorly optimized.
+the workers is a lot... 4.5 GB for all processes (lol, maybe why Golang exists),
+but the advantage is simple parallelism, vertical scaling, and the ability
+to run any coroutine that might otherwise be poorly optimized.
 
-python3 -m dogdorm.worker
+**python3 -m dogdorm.worker**
 
 # Adding new servers
 
@@ -67,14 +67,14 @@ There's already many servers included but more can be added here.
 
 On Linux you can setup programs to run as a service using systemctl. This
 should work well on Ubuntu and Debian. If you would like to use the software
-in this way first install the Python package then run the install.sh script
+in this way first install the Python package then run the **install.sh script
 inside the systemctl file.
 
-sudo systemctl stop dogdorm
+**sudo systemctl stop dogdorm**
 
-sudo systemctl start dogdorm
+**sudo systemctl start dogdorm**
 
-sudo systemctl status dogdorm
+**sudo systemctl status dogdorm**
 
 The install script enables this monitor to auto start when you reboot your
 server. By default the workers check for work every hour so this should
