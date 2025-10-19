@@ -51,10 +51,10 @@ consistent when a single event loop is run in a single process.
 This is a long way to say that: I simply start 100 Python processes to do
 all my networking work. The work doesn't do anything complex like try to
 "concurrently" execute multiple work tasks at once. Instead, the work is done
-sequently, and the result sent back to the dealer. The memory cost of doing
-the workers is a lot... 4.5 GB for all processes (lol, maybe why Golang exists),
+sequently, and the result sent back to the dealer. The memory cost of every
+worker is a lot... 4.5 GB for all processes (lol, maybe why Golang exists),
 but the advantage is simple parallelism, vertical scaling, and the ability
-to run any coroutine that might otherwise be poorly optimized.
+to run coroutines that might be poorly optimized for asyncio.
 
 **python3 -m dogdorm.worker**
 
