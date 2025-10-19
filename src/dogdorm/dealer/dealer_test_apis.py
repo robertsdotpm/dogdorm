@@ -1,3 +1,10 @@
+"""
+These are all fastapi functions that are conditionally enabled to help
+with testing and debugging. They will be enabled if export P2PD_DEBUG=1
+when running dogdorm.dealer. Definitions here that are unavailable
+don't mean much since this file is run within the context of dogdorm.dealer
+so it gets that file's symbols.
+"""
 import asyncio
 from fastapi import Depends
 from ..defs import *

@@ -47,6 +47,46 @@ IMPORTS_TEST_DATA = [
     [None, STUN_MAP_TYPE, V4, "49.12.125.53", 3478, None, None],
 ]
 
+def insert_imports_test_data(mem_db, test_data):
+    for info in test_data:
+        fqn = info[0]
+        info = info[1:]
+        record = mem_db.insert_import(*info, fqn=fqn)
+
+        # Set it up as work.
+        mem_db.add_work(record["af"], IMPORTS_TABLE_TYPE, [record])
+
+def insert_services_test_data(mem_db, test_data):
+    for groups in test_data:
+        records = []
+
+        # All items in a group share the same group ID.
+        for group in groups:
+
+            # Store alias(es)
+            alias = None
+            try:
+                for fqn in group[0]:
+                    alias = mem_db.fetch_or_insert_alias(group[2], fqn)
+                    break
+            except:
+                log_exception()
+
+            alias_id = alias["id"] if alias else None
+            record = mem_db.insert_service(
+                service_type=group[1],
+                af=group[2],
+                proto=group[3],
+                ip=ip_norm(group[4]),
+                port=group[5],
+                user=None,
+                password=None,
+                alias_id=alias_id
+            )
+
+            records.append(record)
+
+        mem_db.add_work(records[0]["af"], SERVICES_TABLE_TYPE, records)
 
 """
 While I update the list of servers, loading WAN addresses is going to be broken.

@@ -8,7 +8,7 @@ If deque was used it would have:
 
 which is decent, but the Log(n) isn't ideal and can still be improved.
 If you use a doubly-linked list over a deque and have a hashtable
-of Node pointers in the list mapped by name / ID, you can then
+of Node pointers mapped by name / ID, you can then
 have Log(1) deletes, too. So moving items between queues is all Log(1).
 
 Would not work if the linked-list was indexed by positional offsets
@@ -24,9 +24,17 @@ from ..db.linked_list import *
 class WorkQueue:
     def __init__(self):
         self.queues = {
+            # Init tells the scheduler "hand out all items as work in this queue"
             STATUS_INIT: LinkedList(),
+
+            # Available work is conditional on how recently it was handed out.
             STATUS_AVAILABLE: LinkedList(),
+
+            # Dealt means it's been given out but if it hasn't been updated
+            # after a threshold then it can be given to someone else.
             STATUS_DEALT: LinkedList(),
+
+            # Completely disabled work items not to be handed out.
             STATUS_DISABLED: LinkedList()
         }
 
@@ -34,15 +42,23 @@ class WorkQueue:
         self.index = {} 
         self.timestamps = {}
 
+    # Work items are groups of one or more servers indexed by unique group_ids.
+    # The group_ids are just increasingly counts on new group.
     def add_work(self, work_id: Hashable, payload: Any, queue_name: int):
         # Avoid overwriting pre-existing work.
         if work_id in self.index:
             raise KeyError(f"add_work: Work ID {work_id} already added.")
         
+        # All new work is added to the end of the linked-list.
+        # The queue to add it to is based on the status enum.
         node = self.queues[queue_name].append((work_id, payload))
         self.index[work_id] = (queue_name, node)
+
+        # Recording the time at queue changes is used by the scheduler
+        # when deciding if work items are too recent or expired.
         self.timestamps[work_id] = int(time.time())
 
+    # Move group given by work_id to destination queue given by status enum.
     def move_work(self, work_id: Hashable, queue_name: int):
         # Work doesn't exist.
         if work_id not in self.index:

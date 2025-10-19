@@ -40,6 +40,7 @@ setup(
     install_requires=install_reqs,
     classifiers=[
         'Intended Audience :: Developers',
-        'Programming Language :: Python :: 3'
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.11',
     ],
 )

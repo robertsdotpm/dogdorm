@@ -1,3 +1,8 @@
+"""
+Specifies a list of types for the memory based database.
+Offers basic sanity checks for data.
+"""
+
 from typing_extensions import TypedDict
 from typing import Any, List, Union, Optional
 from pydantic import BaseModel, field_validator, model_validator
@@ -5,6 +10,10 @@ from p2pd import *
 from fqdn import FQDN
 from ..defs import *
 
+"""
+Used by the memory DB to have unique indexes across fields.
+Also implements some custom logic for fqn_or_ip.
+"""
 class UniqueIndex:
     def __init__(self, key_fields):
         """
@@ -53,7 +62,6 @@ class UniqueIndex:
         Return all objects in the index.
         """
         return list(self._index.values())
-
 
 def add_validator(field_name: str, cls: type, func):
     setattr(
@@ -191,7 +199,6 @@ add_validator("table_type", MetaGroup, validate_table_type)
 add_validator("ip", AliasType, validate_ip)
 add_validator("ip", RecordType, validate_ip)
 
-# Field types.
 MEM_DB_TYPES = {
     SERVICES_TABLE_TYPE: RecordType,
     ALIASES_TABLE_TYPE: AliasType,

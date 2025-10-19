@@ -1,7 +1,7 @@
 from p2pd import UDP, TCP, V4, V6
 from .defs import *
 
-
+# Used by the /server API call.
 TXTS = {
     "af": {
         V4: "IPv4",

@@ -1,3 +1,8 @@
+"""
+Double-linked list implementation. The work queues used by the dealer server
+use this data structure for O(1) deletes and inserts.
+"""
+
 class Node:
     __slots__ = ("value", "prev", "next")
     
@@ -5,7 +10,6 @@ class Node:
         self.value = value
         self.prev = None
         self.next = None
-
 
 class LinkedList:
     def __init__(self):

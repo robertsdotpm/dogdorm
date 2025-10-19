@@ -1,3 +1,4 @@
+import uvicorn
 from .dealer import *
 
 uvicorn.run(

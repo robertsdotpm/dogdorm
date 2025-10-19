@@ -2,6 +2,20 @@ import httpx
 from p2pd import *
 from ..defs import *
 
+"""
+P2PD allows message replies to be filtered by specific IP or ports.
+When the cip or cport fields are set, the STUN client uses these
+to asynchronously receive messages from those addresses.
+This greatly simplifies communication with UDP services where
+messages may arrive out of order. In the case of STUN: you can multiplex
+multiple messages on the same socket and the transaction ID used for
+requests lets you filter only the replies you're interested in.
+
+The function bellow makes the right STUN request based on whether
+a reply should come from a different IP or port. It will timeout
+and return None on failure. STUN replies are also validated to make
+sure the expected attribute fields are included for a response.
+"""
 async def validate_stun_server(ip, port, pipe, mode, cip=None, cport=None):
     # New client used for the req.
     stun_client = STUNClient(
@@ -17,20 +31,16 @@ async def validate_stun_server(ip, port, pipe, mode, cip=None, cport=None):
     if mode == RFC3489:
         # Reply from different port only.
         if cport is not None and cip is None:
-            #print("change port", ip, ":", cport)
             reply = await stun_client.get_change_port_reply((ip, cport), pipe)
             
-
         # Reply from different IP:port only.
         if cip is not None and cport is not None:
-            #print("change ip:port", cip, ":", cport)
             reply = await stun_client.get_change_tup_reply((cip, cport), pipe)
 
         # The NAT test code doesn't need to very just the IP.
         # So that edge case is not checked.
         # if cip is not None and cport is None: etc
         if cip is None and cport is None:
-            #print("get reug stun reply.")
             reply = await stun_client.get_stun_reply(pipe=pipe)
     else:
         reply = await stun_client.get_stun_reply(pipe=pipe)
@@ -42,6 +52,62 @@ async def validate_stun_server(ip, port, pipe, mode, cip=None, cport=None):
 
     return reply
 
+# So with RFC 3489 there's 4 STUN servers to check:
+async def validate_rfc3489_stun_server(af, proto, nic, primary_tup, secondary_tup):
+    infos = [
+        # Test primary ip, port.
+        (primary_tup[0], primary_tup[1], None, None,),
+
+        # Test reply from primary ip, change port.
+        (primary_tup[0], primary_tup[1], None, primary_tup[2],),
+
+        # Test reply from secondary IP:primary port.
+        (secondary_tup[0], primary_tup[1], None, None),
+
+        # Test secondary IP, change port.
+        (primary_tup[0], primary_tup[1], secondary_tup[0], secondary_tup[2],),
+    ]
+
+    route = nic.route(af)
+    pipe = await pipe_open(proto, route=route)
+
+    # Compare IPS in different tups (must be different)
+    if IPR(primary_tup[0], af) == IPR(secondary_tup[0], af):
+        raise Exception("primary and secondary IPs must differ 3489.")
+
+    # Change port must differ.
+    if primary_tup[1] == secondary_tup[2]:
+        raise Exception("change port must differ 3489")
+
+    # Test each STUN server.
+    for info in infos:
+        dest_ip, dest_port, cip, cport = info
+        await validate_stun_server(
+            ip=dest_ip,
+            port=dest_port,
+            pipe=pipe,
+            mode=RFC3489,
+            cip=cip,
+            cport=cport
+        )
+
+"""
+When given an IP for a STUN server we want to know what version
+of the protocol the server supports:
+
+RFC 3489 - allows for NAT tests and IP lookups
+RFC 5389 - only allows for IP lookups.
+
+We also would like to see what transport protocols the server supports.
+
+UDP - standard for most STUN servers (used for NAT tests.)
+TCP - needed to lookup external port mappings for more reliable
+TCP hole punching in P2PD (very important.)
+
+It goes without saying: that to correctly classify a STUN server
+you ought to not be behind a NAT that filters replies! Or have
+the NAT setup correctly to avoid interfering with the results.
+"""
 async def stun_server_classifier(af, ip, port, nic):
     # List of STUN server endpoints sorted based on type and proto.
     servers = []
@@ -78,6 +144,13 @@ async def stun_server_classifier(af, ip, port, nic):
                 secondary_tup
             )
 
+            """
+            So, for servers that "fully" support RFC 3489, they must correctly
+            reply from 4 different expected IP:port combinations.
+            The above function checks all those combinations and throws an
+            exception if it fails. After which: these new 4 servers are added
+            as servers to monitor by the software (and grouped together.)
+            """
             servers.append([
                 [STUN_CHANGE_TYPE, int(af), int(UDP), ip, port, None, None],
                 [STUN_CHANGE_TYPE, int(af), int(UDP), ip, reply.ctup[1], None, None],
@@ -96,9 +169,7 @@ async def stun_server_classifier(af, ip, port, nic):
         (UDP, RFC5389, STUN_MAP_TYPE)
     ]
 
-    # Check other capabilities for STUN server.
-    # Here the RFC type controls whether to send a specfic magic cookie.
-    # It says "change type" but here we're only interest in a reply at all
+    # Check for IP lookups for RFC 5389 (on TCP and UDP.)
     for stun_info in stun_infos:
         stun_proto, stun_mode, stun_type = stun_info
         stun_client = STUNClient(
@@ -109,6 +180,15 @@ async def stun_server_classifier(af, ip, port, nic):
             mode=stun_mode
         )
 
+        """
+        Lastly, we check whether regular IP lookups work for this server,
+        using the more restrictive RFC type (should potentially also work
+        for RFC 3489, too, but the inverse isn't true. E.g. RFC 5389
+        allows for IP lookups to succeed with Google's servers by setting
+        a very specific magic cookie, whereas the magic cookie may be
+        anything for RFC 3489 that isn't that value and not using it
+        causes Google's STUN servers to fail.
+        """
         try:
             wan_ip = await stun_client.get_wan_ip()
             if wan_ip is not None:
@@ -120,46 +200,6 @@ async def stun_server_classifier(af, ip, port, nic):
             continue
 
     return servers
-
-# So with RFC 3489 there's actualoly 4 STUN servers to check:
-async def validate_rfc3489_stun_server(af, proto, nic, primary_tup, secondary_tup):
-    infos = [
-        # Test primary ip, port.
-        (primary_tup[0], primary_tup[1], None, None,),
-
-        # Test reply from primary ip, change port.
-        (primary_tup[0], primary_tup[1], None, primary_tup[2],),
-
-        # Test primary ip, change ip replay.
-        # NAT test doesn't need this functionality -- skip for now.
-        #(secondary_tup[0], secondary_tup[1], secondary_tup[0], None),
-
-        # Test secondary IP, change port.
-        (primary_tup[0], primary_tup[1], secondary_tup[0], secondary_tup[2],),
-    ]
-
-    route = nic.route(af)
-    pipe = await pipe_open(proto, route=route)
-
-    # Compare IPS in different tups (must be different)
-    if IPR(primary_tup[0], af) == IPR(secondary_tup[0], af):
-        raise Exception("primary and secondary IPs must differ 3489.")
-
-    # Change port must differ.
-    if primary_tup[1] == secondary_tup[2]:
-        raise Exception("change port must differ 3489")
-
-    # Test each STUN server.
-    for info in infos:
-        dest_ip, dest_port, cip, cport = info
-        await validate_stun_server(
-            ip=dest_ip,
-            port=dest_port,
-            pipe=pipe,
-            mode=RFC3489,
-            cip=cip,
-            cport=cport
-        )
 
 # Will just have workers wait until success.
 async def retry_curl_on_locked(curl, params, endpoint, retries=3):
@@ -197,7 +237,6 @@ async def fetch_work_list(curl, table_type=None):
     if resp is None:
         return INVALID_SERVER_RESPONSE
 
-
     # Wrap in try except for safety:
     # Server might return an unexpected response.
     try:
@@ -218,6 +257,10 @@ async def fetch_work_list(curl, table_type=None):
     # Return work (may exist or not.)
     return work
 
+"""
+The worker calls this to indicate the outcome of executing work.
+Was it a success (server alive) or not.
+"""
 async def update_work_status(curl, status_ids, is_success):
     # Indicate the status outcome.
     t = int(time.time())
@@ -231,9 +274,16 @@ async def update_work_status(curl, status_ids, is_success):
         await retry_curl_on_locked(curl, params, "/complete")
         #print(out.out)
 
+"""
+Used exclusively to check servers being added as possible imports.
+This function tries to discover end points to add from those imports.
+Should any exist, otherwise, none are imported, and the work is failed.
+"""
 async def validate_service_import(nic, pending_insert, service_monitor):
     import_list = []
     if pending_insert["type"] == STUN_MAP_TYPE:
+        # This code also discovers new STUN server end points.
+        # Map is just used as a generic type to signal that it's STUN.
         import_list = await stun_server_classifier(
             af=pending_insert["af"],
             ip=pending_insert["ip"],
@@ -249,8 +299,8 @@ async def validate_service_import(nic, pending_insert, service_monitor):
         else:
             proto = TCP
 
+        # Only insert services if the import was alive.
         if is_success:
-            # Same format as what stun_server_classifier returns.
             import_list = [[
                 [
                     pending_insert["type"], 

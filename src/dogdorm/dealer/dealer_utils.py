@@ -8,12 +8,13 @@ from ..defs import *
 from ..txt_strs import *
 from ..db.db_init import *
 
-
+# Limit API method to localhost clients only.
 def localhost_only(request: Request):
     client_host = request.client.host
     if client_host not in ("127.0.0.1", "::1"):
         raise HTTPException(status_code=403, detail="Access forbidden")
 
+# Indicate an API response is JSON (and format it nicely.)
 class PrettyJSONResponse(JSONResponse):
     def render(self, content: any) -> bytes:
         return json.dumps(
@@ -23,6 +24,12 @@ class PrettyJSONResponse(JSONResponse):
             indent=2,        # pretty-print here
         ).encode("utf-8")
 
+"""
+The software monitors uptime of servers, failures, and so on.
+Based on these variables a score can be computed for the server to
+try to reflect its overall reliability. The servers are then filtered
+by this score so that the most reliable servers are first.
+"""
 def compute_service_score(status, max_uptime_override=None):
     if not isinstance(status, dict) or status is None:
         return 0.0
@@ -57,6 +64,12 @@ def compute_service_score(status, max_uptime_override=None):
     # Clamp final score to [0,1]
     return min(max(quality_score, 0.0), 1.0)
 
+"""
+When servers are imported a DNS or FQN may be associated with them.
+That DNS name helps to make sure that if the IP ever changes the software
+can find where the new server is in future. Not all IPs added will have FQNs
+associated with them but if any FQNs "point" to that IP it will show up here.
+"""
 def get_fqn_list(mem_db, ip):
     if ip is None:
         return []
@@ -69,6 +82,12 @@ def get_fqn_list(mem_db, ip):
 
     return list(fqns)[::-1]
 
+"""
+This function builds the result list for the /server call.
+Every single relevant record is pulled and put into a single dict.
+Importantly, the fields are sorted to hopefully reflect the most reliable
+servers first in the results.
+"""
 def build_server_list(mem_db):
     # Init server list
     s = {}
@@ -81,24 +100,30 @@ def build_server_list(mem_db):
 
     for group_id in mem_db.groups:
         try:
+            # A group is one or more associated servers.
+            # Only STUN has more than one so far (test_NAT.)
             meta_group = mem_db.groups[group_id]
             if meta_group.table_type != SERVICES_TABLE_TYPE:
                 continue
 
+            # Combine associated status fields with record table field.
             scores = []
             fields = ("test_no", "failed_tests", "uptime", "max_uptime", "last_success")
             group = list_x_to_dict(meta_group.group)
             for record in group:
+                # Invalid records should not break the entire attempt.
                 try:
+                    # If there's no associated status record then skip.
                     status_obj = mem_db.statuses.get(record.get("status_id"))
                     if not status_obj:
                         continue
                     status = getattr(status_obj, "dict", lambda: {})()
 
-
+                    # Combine status fields with record.
                     for k in fields:
                         record[k] = status.get(k, 0)
 
+                    # Computer score and add fqn.
                     record["score"] = compute_service_score(status)
                     record["fqns"] = get_fqn_list(mem_db, record.get("ip"))
                     scores.append(record["score"])
@@ -106,7 +131,8 @@ def build_server_list(mem_db):
                     # Skip invalid record but continue processing others
                     continue
 
-            # Compute average score if any
+            # Since a group may have multiple servers (and different scores)
+            # to simply sorting we average them and set the same for all entries.
             if scores:
                 score_avg = sum(scores) / len(scores)
                 for record in group:
@@ -127,16 +153,29 @@ def build_server_list(mem_db):
     for service_type in SERVICE_TYPES:
         for af in VALID_AFS:
             for proto in (UDP, TCP):
+                """
+                The most import line here is the sort line:
+                it sorts by group since every entry in the group gets the same score
+                the group items don't move, but the groups as a whole do to reflect
+                where groups fall with respect to each other.
+                """
                 try:
                     by_proto = s[TXTS[service_type]][TXTS["af"][af]][TXTS["proto"][proto]]
                     by_proto.sort(key=lambda x: x[0].get("score", 0), reverse=True)
                 except Exception:
                     continue
 
+    # Indicate how fresh the results are.
     s["timestamp"] = int(time.time())
     return s
 
+"""
+Used by the server to indicate that work handed out has been "done"
+and they are updating the status of the result.
+Work jobs may succeed or fail.
+"""
 def mark_complete(mem_db, is_success: int, status_id: int, t=None):
+    # Work starts out with the target of being reassigned available.
     t = t or int(time.time())
     status_type = STATUS_AVAILABLE
     if status_id not in mem_db.statuses:
@@ -179,10 +218,25 @@ def mark_complete(mem_db, is_success: int, status_id: int, t=None):
         status.failed_tests += 1
         status.uptime = 0
     
+    # Update work with the new status and increase
+    # How many times its been executed.
     status.status = status_type
     status.test_no += 1
     status.last_status = t
 
+"""
+The server uses this code to hand out jobs or work to the workers.
+It works by traversing linked-lists of jobs.
+The lists are ordered by oldest at the head / start, and
+most recent items added at the end.
+
+Efficient time-based checks can then occur across the entire list
+since excluding earlier items based on being "too early" for re-scheduling
+also implies that all items after it are also too early.
+
+This is a simple task scheduler with Log(1) inserts and deletions
+any where in the list (unlike regular Python data types.)
+"""
 def allocate_work(mem_db, need_afs, table_types, cur_time, mon_freq):
     # Get oldest work by table type and client AF preference.
     for table_choice in table_types:
@@ -213,8 +267,7 @@ def allocate_work(mem_db, need_afs, table_types, cur_time, mon_freq):
                         if elapsed < mon_freq:
                             break
 
-                    # Check for worker timeout.sd
-                    # TODO: this line is making work get reallocated.
+                    # Check for worker timeout.
                     if status_type == STATUS_DEALT:
                         if elapsed < WORKER_TIMEOUT:
                             break
@@ -225,6 +278,11 @@ def allocate_work(mem_db, need_afs, table_types, cur_time, mon_freq):
                 
     return []
 
+"""
+The software supports doing DNS updates to aliases / FQNs.
+If there's any services or imports that share that FQN then
+this function is used to also update their IPs.
+"""
 def update_table_ip(mem_db, table_type: int, ip: str, alias_id: int, current_time: int):
     for record in mem_db.records_by_aliases[alias_id]:
         # Skip records that don't match the table type.

@@ -1,3 +1,9 @@
+"""
+The worker is a Python 3 process that gets work from the dealer server.
+The work consists of monitoring for DNS changes, checking possible imports,
+and assessing whether servers are online or not.
+"""
+
 import asyncio
 import random
 from p2pd import *

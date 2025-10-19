@@ -1,6 +1,19 @@
-import uvicorn
+"""
+The "dealer" is a server that hands out jobs / work items to workers.
+It's implemented as a simple fastapi Python server.
+All main functions are intentionally not async to help avoid locking issues.
+Data is stored into a memory DB in db/mem_db. There is also a "background"
+async task that periodically saves a backup of the memory database to an
+sqlite DB.
+
+When you restart the dealer -- it will consult the SQLite DB to
+populate the initial mem DB with. A background task also updates what
+the API returns every 1 minute. The reason this isn't live is the entire
+DB has to be processed, scored, and turned to JSON, so for speed it gets
+cached as a string ready to be returned instantly.
+"""
+
 import aiosqlite
-import threading
 from fastapi import FastAPI, Depends, Request
 from fastapi.responses import Response
 from p2pd import *
@@ -19,8 +32,8 @@ mem_db = MemDB()
 server_cache = []
 server_list_str = ""
 refresh_task = None
-db_lock = threading.Lock()
 
+# Used to backup the memory-based database to sqlite.
 async def save_all(mem_db):
     async with aiosqlite.connect(DB_NAME) as sqlite_db:
         try:
@@ -35,6 +48,10 @@ async def save_all(mem_db):
         else:
             await sqlite_db.commit()
 
+"""
+Background task that periodically the list of monitored servers to return.
+It also backs up the DB to disk. Async so hopefully doesn't block fastapi. 
+"""
 async def refresh_server_cache():
     global server_list_str
     global server_cache
@@ -54,6 +71,7 @@ async def refresh_server_cache():
             log_exception()
         await asyncio.sleep(60)
 
+# Since the API is mostly dynamic tell browsers not to cache it.
 @app.middleware("http")
 async def no_cache_middleware(request: Request, call_next):
     response: Response = await call_next(request)
@@ -62,6 +80,11 @@ async def no_cache_middleware(request: Request, call_next):
     response.headers["Expires"] = "0"
     return response
 
+"""
+This function is run once when the dealer is restarted.
+It imports all the records from the sqlite DB into the memory DB.
+It also merges the CSV fields in server_lists into the memory DB.
+"""
 @app.on_event("startup")
 async def main():
     global refresh_task
@@ -76,6 +99,12 @@ async def main():
 
     refresh_task = asyncio.create_task(refresh_server_cache())
 
+"""
+This hook is run when the server is given a kill signal.
+The server tries to back up the memory DB to disk before exit so nothing
+is lost. The restart.sh script also sends a request to do this before
+it tries to aggressively kill the server.
+"""
 @app.on_event("shutdown")
 async def shutdown_event():
     print("Server is stopping... cleaning up resources")
@@ -84,6 +113,7 @@ async def shutdown_event():
 # Hands out work (servers to check) to worker processes.
 @app.post("/work", dependencies=[Depends(localhost_only)])
 def api_get_work(request: GetWorkReq):
+    # Work can be selected based on type and even address family of server.
     stack_type = request.stack_type
     current_time = request.current_time or int(time.time())
     monitor_frequency = request.monitor_frequency or MONITOR_FREQUENCY
@@ -110,6 +140,7 @@ def api_get_work(request: GetWorkReq):
         monitor_frequency
     )
 
+# Indicate that work has been completed.
 @app.post("/complete", dependencies=[Depends(localhost_only)])
 def api_work_done(payload: WorkDoneReq):
     results: List[int] = []
@@ -123,10 +154,17 @@ def api_work_done(payload: WorkDoneReq):
 
     return results
 
+"""
+# This is a special method called only for complete import work
+# that resulted in a valid online server and indicates to the dealer
+# to start monitoring that new service.
+"""
 @app.post("/insert", dependencies=[Depends(localhost_only)])
 def api_insert_services(payload: InsertServicesReq):
-    print(payload)
+    # One import can result in learning multiple groups of
+    # related servers to start monitoring.
     for groups in payload.imports_list:
+        # If any servers in a group already exist then skip add.
         try:
             records = []
             alias_count = 0
@@ -159,15 +197,17 @@ def api_insert_services(payload: InsertServicesReq):
 
     return []
 
+# Special method only called by alias work to update DNS IPs.
 @app.post("/alias", dependencies=[Depends(localhost_only)])
 def api_update_alias(data: AliasUpdateReq):
+    # Only want public IPs.
     ip = ensure_ip_is_public(data.ip)
     current_time = data.current_time or int(time.time())
     alias_id = data.alias_id
-
     if alias_id not in mem_db.records[ALIASES_TABLE_TYPE]:
         raise Exception("Alias id not found.")
     
+    # Load the alias record to update.
     alias = mem_db.records[ALIASES_TABLE_TYPE][alias_id]
 
     # Update alias by IP mappings.
@@ -175,6 +215,7 @@ def api_update_alias(data: AliasUpdateReq):
     alias.ip = ip
     mem_db.add_alias_by_ip(alias)
 
+    # Any record that uses the alias also has its IP updated.
     for table_type in (IMPORTS_TABLE_TYPE, SERVICES_TABLE_TYPE):
         update_table_ip(mem_db, table_type, ip, alias_id, current_time)
 
@@ -186,6 +227,7 @@ def api_update_alias(data: AliasUpdateReq):
 async def api_list_servers():
     return Response(content=server_list_str, media_type="application/json")
 
+# Support extended API methods for testing purposes.
 if IS_DEBUG:
     cwd = get_script_parent()
     test_apis_path = os.path.join(cwd, "dealer_test_apis.py")

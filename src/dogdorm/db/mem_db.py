@@ -1,3 +1,26 @@
+"""
+The second iteration of the DB for monitoring different servers.
+The data structure has 3 main tables:
+    alias -- store DNS names
+    imports -- servers that could be monitored in the future
+    services -- servers that are being monitored
+        -- imports yield new services based on its validity
+
+In Python: whenever await is typed a coroutine can be interrupted,
+and others can run. Thus, if data manipulation is mixed with coroutines,
+its possible to lead to corrupt data, dead locks, race conditions, etc.
+
+The first version of the DB used sqlite alone which lead to locking
+issues when workers tried to do database operations. This new version
+is entirely in memory and only uses sqlite for periodic checkpoints.
+Since coroutines are avoided, all operations are atomic, helping to
+avoid problems that occur through concurrency.
+
+The database also stores work queues for the workers. Types of work are
+things like: see if this import is valid, test this DNS name, check this
+server.
+"""
+
 import time
 from typing import Any
 from collections import OrderedDict
