@@ -66,4 +66,4 @@ sudo systemctl start $SERVICE_NAME
 echo "Done. Check status with: sudo systemctl status $SERVICE_NAME"
 echo "Restart with: sudo systemctl restart $SERVICE_NAME"
 echo "View logs with: sudo journalctl -u $SERVICE_NAME -f"
-echo "Increase worker no with: export MONITOR_WORKER_NO=10; sudo systemctl restart $SERVICE_NAME"
+echo "Increase worker no with: export MONITOR_WORKER_NO=150; sudo systemctl restart $SERVICE_NAME"
