@@ -1,4 +1,4 @@
-# Dogdorm - it monitors a few different servers
+# Dogdorm - custom server uptime monitor
 
 I have a networking project called P2PD that uses public STUN, MQTT, NTP, and
 TURN servers. Since public infrastructure tends to change a lot, its hard
