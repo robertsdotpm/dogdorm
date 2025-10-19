@@ -12,7 +12,7 @@ an in-memory database to reflect server uptimes. Periodically, the database
 is saved to disk using sqlite. I chose this approach to avoid locking issues
 with many writes. 
 
-python3 -m dogdorm.dealer
+**python3 -m dogdorm.dealer**
 
 After the dealer server is started you can view the server list sorted by
 most reliable server. Bellow is the URL for the P2PD dealer server as
@@ -42,20 +42,19 @@ be non-blocking ends up subtly blocking the event loop anyway,
 
 One might ask then, how would you scale up a Python program to handle lots
 of work items? You could look at "threads" in Python. But you would quickly find
-that they are not real OS threads and support what coroutines do anyway.
-Python does allow processes, and "pools" of such processes. But asyncio
-doesn't work nearly as well when you have to manually setup event loops to run
-in each process. Asyncio is complex enough that its only (somewhat)
+that they are not real OS threads and allow what coroutines do anyway.
+Python does have processes, and "pools" of such processes. But asyncio
+doesn't work nearly as well when you have to manually setup event loops in 
+each process. Asyncio is complex enough that its only (somewhat)
 consistent when a single event loop is run in a single process.
 
-This is a long way to say thatP: I simply start 100 Python processes to do
+This is a long way to say that: I simply start 100 Python processes to do
 all my networking work. The work doesn't do anything complex like try to
 "concurrently" execute multiple work tasks at once. Instead, the work is done
 sequently, and the result sent back to the dealer. The memory cost of doing
-the workers is a frigging lot... 4.5 GB worth for such Python processes,
-but the advantage is dead simple process management, vertical scaling, and
-being able to run any coroutine that may be poorly optimized without
-blocking other workers.
+the workers is a lot... 4.5 GB for all processes, but the advantage
+is simple parallelism, vertical scaling, and being able to run any
+coroutine that might otherwise be poorly optimized.
 
 python3 -m dogdorm.worker
 
