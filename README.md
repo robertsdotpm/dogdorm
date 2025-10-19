@@ -10,7 +10,7 @@ Dogdorm is a two-part system. A "dealer" server that hands out work and the
 workers that do the work. The dealer consists of fastapi methods that change
 an in-memory database to reflect server uptimes. Periodically, the database
 is saved to disk using sqlite. I chose this approach to avoid locking issues
-with many writes to the DB. 
+with many writes. 
 
 python3 -m dogdorm.dealer
 
@@ -72,7 +72,9 @@ in this way first install the Python package then run the install.sh script
 inside the systemctl file.
 
 sudo systemctl stop dogdorm
+
 sudo systemctl start dogdorm
+
 sudo systemctl status dogdorm
 
 The install script enables this monitor to auto start when you reboot your
