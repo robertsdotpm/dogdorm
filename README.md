@@ -68,7 +68,7 @@ There's already many servers included but more can be added here.
 On Linux you can setup programs to run as a service using systemctl. This
 should work well on Ubuntu and Debian. If you would like to use the software
 in this way first install the Python package then run the **install.sh** script
-inside the systemctl file.
+inside the systemctl/ directory.
 
 **sudo systemctl stop dogdorm**
 
