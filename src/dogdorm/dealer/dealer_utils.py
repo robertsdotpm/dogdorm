@@ -319,9 +319,9 @@ def update_table_ip(mem_db, table_type: int, ip: str, alias_id: int, current_tim
             record.ip = ip
 
 def gen_p2pd_legacy_settings(server_cache):
-   map_servers = {
+    map_servers = {
         int(UDP): { int(IP4): [], int(IP6): [] },
-        int(TCP): { int(IP4): [], int(IP6): [] },
+        int(TCP): { int(IP4): [], int(IP6): [] }
     }
 
     change_servers = {
