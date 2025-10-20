@@ -22,8 +22,9 @@ http://ovh1.p2pd.net:8000/servers
 
 # Install
 
-Clone the repo to your comp and edit defs.py to update it to your machines
-networking config (this is to cache the details for the workers NICs.)
+Clone the repo to your comp and edit defs.py in src/dogdorm to
+update it to your machines networking config (this is to cache the
+details for the workers NICs so they don't all do this multiple times.)
 Then install the software with:
 
 **python3 -m pip install -e .**
