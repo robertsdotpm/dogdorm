@@ -22,9 +22,6 @@ http://ovh1.p2pd.net:8000/servers
 
 # Install
 
-((Software is not ready to be installed yet as it uses a few libraries with
-code I haven't merged and there's last minute items to do yet.))
-
 The software can be installed directly from this repo
 
 **python3 -m pip install -e .**
