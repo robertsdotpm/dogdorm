@@ -317,3 +317,157 @@ def update_table_ip(mem_db, table_type: int, ip: str, alias_id: int, current_tim
         # Only set ip if there's a period of downtime.
         if cond_one or cond_two:
             record.ip = ip
+
+def gen_p2pd_legacy_settings(server_cache):
+   map_servers = {
+        int(UDP): { int(IP4): [], int(IP6): [] },
+        int(TCP): { int(IP4): [], int(IP6): [] },
+    }
+
+    change_servers = {
+        int(UDP): { int(IP4): [], int(IP6): [] },
+        int(TCP): { int(IP4): [], int(IP6): [] },
+    }
+
+    mqtt_servers = {} # By id then coverted to list.
+
+    turn_servers = {} # By id then coverted to list.
+
+    key_lookup = {
+        "UDP": int(UDP),
+        "TCP": int(TCP),
+        "IPv4": int(IP4),
+        "IPv6": int(IP6),
+    }
+
+    # Build STUN "map" servers (RFC 5389)
+    for af in server_cache["STUN(see_ip)"]:
+        for proto in server_cache["STUN(see_ip)"][af]:
+            for group in server_cache["STUN(see_ip)"][af][proto]:
+                for entry in group:
+                    if entry["fqns"]:
+                        host = entry["fqns"][0]
+                    else:
+                        host = None
+
+                    server = {
+                        "mode": 2,
+                        "host": host,
+                        "primary": {
+                            "ip": entry["ip"],
+                            "port": entry["port"],
+                        },
+                        "secondary": {'ip': None, 'port': None}
+                    }
+
+                    k_proto = key_lookup[proto]
+                    k_af = key_lookup[af]
+                    map_servers[k_proto][k_af].append(server)
+
+    # Build STUN change servers (RFC 3489)
+    for af in server_cache["STUN(test_nat)"]:
+        for proto in server_cache["STUN(test_nat)"][af]:
+            for group in server_cache["STUN(test_nat)"][af][proto]:
+                if entry["fqns"]:
+                    host = entry["fqns"][0]
+                else:
+                    host = None
+
+                server = {
+                    "mode": 1,
+                    "primary": {
+                        "ip": group[0]["ip"],
+                        "port": group[0]["port"],
+                    },
+                    "secondary": {
+                        "ip": group[3]["ip"],
+                        "port": group[3]["port"],
+                    }
+                }
+
+                k_proto = key_lookup[proto]
+                k_af = key_lookup[af]
+                change_servers[k_proto][k_af].append(server)
+
+    # Build MQTT server list.
+    mqtt_servers = {}
+    for af in server_cache["MQTT"]:
+        for proto in server_cache["MQTT"][af]:
+            for group in server_cache["MQTT"][af][proto]:
+                if entry["fqns"]:
+                    host = entry["fqns"][0]
+                else:
+                    host = None
+
+                rid = group[0]["id"]
+                if rid not in mqtt_servers:
+                    mqtt_servers[rid] = {}
+
+                if "host" not in mqtt_servers[rid]:
+                    mqtt_servers[rid]["host"] = host
+
+                if not mqtt_servers[rid]["host"]:
+                    mqtt_servers[rid]["host"] = host
+
+                mqtt_servers[rid]["port"] = group[0]["port"]
+
+                for k_af in (int(IP4), int(IP6)):
+                    if k_af not in mqtt_servers[rid]:
+                        mqtt_servers[rid][k_af] = None
+
+                k_af = key_lookup[af]
+                mqtt_servers[rid][k_af] = group[0]["ip"]
+
+    mqtt_list = d_vals(mqtt_servers)
+
+    # Build MQTT server list.
+    turn_servers = {}
+    for af in server_cache["TURN"]:
+        for proto in server_cache["TURN"][af]:
+            for group in server_cache["TURN"][af][proto]:
+                if entry["fqns"]:
+                    host = entry["fqns"][0]
+                else:
+                    host = None
+
+                rid = group[0]["id"]
+                if rid not in turn_servers:
+                    turn_servers[rid] = {}
+
+                if "host" not in turn_servers[rid]:
+                    turn_servers[rid]["host"] = host
+
+                if not turn_servers[rid]["host"]:
+                    turn_servers[rid]["host"] = host
+
+                turn_servers[rid]["port"] = group[0]["port"]
+
+                for k_af in (int(IP4), int(IP6)):
+                    if k_af not in turn_servers[rid]:
+                        turn_servers[rid][k_af] = None
+
+                k_af = key_lookup[af]
+                turn_servers[rid][k_af] = group[0]["ip"]
+                if "afs" not in turn_servers[rid]:
+                    turn_servers[rid]["afs"] = []
+
+                turn_servers[rid]["afs"].append(k_af)
+                turn_servers[rid]["user"] = group[0]["user"]
+                turn_servers[rid]["pass"] = group[0]["password"]
+                turn_servers[rid]["realm"] = None
+
+    turn_list = d_vals(turn_servers)
+    map_servers = map_servers
+    change_servers = change_servers
+
+    out = rf"""
+STUN_MAP_P2PD = {map_servers}
+
+STUN_CHANGE_SERVERS = {change_servers}
+
+MQTT_SERVERS = {mqtt_list}
+
+TURN_SERVERS = {turn_list}
+    """
+
+    return out

@@ -12,31 +12,6 @@ from .worker_utils import *
 from .worker_monitors import *
 from ..txt_strs import *
 
-"""
-While I update the list of servers, loading WAN addresses is going to be broken.
-So I'll manually set this for both speed and reliability.
-"""
-if_info = {'id': 'eno1',
- 'is_default': {2: True, 10: True},
- 'mac': '00-1e-67-fa-5d-42',
- 'name': 'eno1',
- 'nat': {'delta': {'type': 1, 'value': 0},
-         'delta_info': 'not applicable',
-         'nat_info': 'open internet',
-         'type': 1},
- 'netiface_index': 1,
- 'nic_no': 0,
- 'rp': {2: [{'af': 2,
-             'ext_ips': [{'af': 2, 'cidr': 32, 'ip': '158.69.27.176'}],
-             'link_local_ips': [],
-             'nic_ips': [{'af': 2, 'cidr': 32, 'ip': '158.69.27.176'}]}],
-        10: [{'af': 10,
-             'ext_ips': [{'af': 10, 'cidr': 128, 'ip': '2607:5300:60:80b0::1'}],
-             'link_local_ips': [],
-             'nic_ips': [{'af': 10, 'cidr': 128, 'ip': '2607:5300:60:80b0::1'}]}]
-        }
-}
-
 async def worker(nic, curl, init_work=None, table_type=None):
     status_ids = []
     try:
@@ -136,11 +111,8 @@ async def process_work(nic, curl, table_type=None, stagger=False):
 
 async def main(nic=None):
     print("Loading interface...")
-    nic = nic or Interface.from_dict(if_info)
+    nic = nic or (await Interface())
     print("Interface loaded: ", nic)
-
-    # Workers start randomly over the next min to avoid traffic surges.
-    #await sleep_random(1000, 60000)
 
     endpoint = ("127.0.0.1", 8000,)
     route = nic.route(IP4)

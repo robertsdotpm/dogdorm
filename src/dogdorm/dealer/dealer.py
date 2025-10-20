@@ -15,7 +15,7 @@ cached as a string ready to be returned instantly.
 
 import aiosqlite
 from fastapi import FastAPI, Depends, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, PlainTextResponse
 from p2pd import *
 from typing import List
 from pprint import pformat
@@ -29,7 +29,7 @@ from ..db.mem_db import *
 
 app = FastAPI(default_response_class=PrettyJSONResponse)
 mem_db = MemDB()
-server_cache = []
+server_cache = {}
 server_list_str = ""
 refresh_task = None
 
@@ -224,8 +224,12 @@ def api_update_alias(data: AliasUpdateReq):
 # Show a listing of servers based on quality
 # Only public API is this one.
 @app.get("/servers")
-async def api_list_servers():
+def api_list_servers():
     return Response(content=server_list_str, media_type="application/json")
+
+@app.get("/legacy", response_class=PlainTextResponse)
+def api_list_p2pd_settings_legacy():
+    return gen_p2pd_legacy_settings(server_cache)
 
 # Support extended API methods for testing purposes.
 if IS_DEBUG:

@@ -26,10 +26,6 @@ The software can be installed directly from this repo
 
 **python3 -m pip install -e .**
 
-Or (soon when its done) from pip
-
-**python3 -m pip install dogdorm**
-
 # Workers
 
 If you want to write modern networking code in Python its normally done using
