@@ -22,7 +22,9 @@ http://ovh1.p2pd.net:8000/servers
 
 # Install
 
-The software can be installed directly from this repo
+Clone the repo to your comp and edit defs.py to update it to your machines
+networking config (this is to cache the details for the workers NICs.)
+Then install the software with:
 
 **python3 -m pip install -e .**
 

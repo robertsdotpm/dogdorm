@@ -111,8 +111,11 @@ async def process_work(nic, curl, table_type=None, stagger=False):
 
 async def main(nic=None):
     print("Loading interface...")
-    nic = nic or (await Interface())
+    nic = nic or Interface.from_dict(IF_INFO)
     print("Interface loaded: ", nic)
+
+    # Workers start randomly over the next min to avoid traffic surges.
+    #await sleep_random(1000, 60000)
 
     endpoint = ("127.0.0.1", 8000,)
     route = nic.route(IP4)

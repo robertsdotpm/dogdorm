@@ -15,6 +15,35 @@ MAX_SERVER_DOWNTIME = 600
 # Try to import items 3 times then stop.
 IMPORT_TEST_NO = 3 
 
+"""
+Manually cache your NIC details here using
+python3 -m p2pd
+
+nic = await Interface()
+await nic.load_nat()
+print(nic.to_dict())
+"""
+IF_INFO = {'id': 'eno1',
+ 'is_default': {2: True, 10: True},
+ 'mac': '00-1e-67-fa-5d-42',
+ 'name': 'eno1',
+ 'nat': {'delta': {'type': 1, 'value': 0},
+         'delta_info': 'not applicable',
+         'nat_info': 'open internet',
+         'type': 1},
+ 'netiface_index': 1,
+ 'nic_no': 0,
+ 'rp': {2: [{'af': 2,
+             'ext_ips': [{'af': 2, 'cidr': 32, 'ip': '158.69.27.176'}],
+             'link_local_ips': [],
+             'nic_ips': [{'af': 2, 'cidr': 32, 'ip': '158.69.27.176'}]}],
+        10: [{'af': 10,
+             'ext_ips': [{'af': 10, 'cidr': 128, 'ip': '2607:5300:60:80b0::1'}],
+             'link_local_ips': [],
+             'nic_ips': [{'af': 10, 'cidr': 128, 'ip': '2607:5300:60:80b0::1'}]}]
+        }
+}
+
 ####################################################################################
 
 # Used to back up the memory database to sqlite.
