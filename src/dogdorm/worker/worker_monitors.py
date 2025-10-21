@@ -1,4 +1,3 @@
-import asyncio
 from p2pd import *
 from ..defs import *
 from .worker_utils import *
@@ -56,36 +55,12 @@ to peers behind NAT devices who can then coordinate a strategy to achieve
 direct connections between them.
 """
 async def monitor_mqtt_type(nic, work):
-    found_msg = asyncio.Queue()
-
-    # Executed on receipt of a new MQTT message.
-    def mqtt_proto_closure(ret):
-        async def mqtt_proto(payload, client):
-            found_msg.put_nowait(payload)
-
-        return mqtt_proto
-
-    # Setup MQTT client with basic proto.
-    mqtt_proto = mqtt_proto_closure(found_msg)
-    peer_id = to_s(rand_plain(10))
     dest = (work[0]["ip"], work[0]["port"])
-    client = SignalMock(peer_id, mqtt_proto, dest)
-
-    # Send message to self and try receive it.
-    client = await client.start()
-    for i in range(0, 3):
-        await client.send_msg(peer_id, peer_id)
-
-        # Allow time to receive responds.
-        await asyncio.sleep(0.1)
-        if not found_msg.empty(): break
-
-    # Wait for a reply.
-    try:
-        await asyncio.wait_for(found_msg.get(), 1.0)
+    client = await is_valid_mqtt(dest)
+    if client:
         await client.close()
         return 1
-    except asyncio.TimeoutError:
+    else:
         return 0
 
 """
@@ -134,17 +109,22 @@ over the Internet. It's used to provide absolute references times to
 synchronize TCP hole punching in P2PD.
 """
 async def monitor_ntp_type(nic, work):
-    # TODO: Only works for IPv4 right now.
     try:
-        for _ in range(3):
-            client = NTPClient(nic)
-            response = await client.request(
-                (work[0]["ip"], work[0]["port"]),
-                version=3
-            )
-            if response is None:
-                continue
+        # Resolved to the server address.
+        server = {
+            "host": work[0]["ip"],
+            "port": work[0]["port"]
+        }
+        
+        # Use small helper func in clock_skew p2pd module.
+        response = await get_ntp(
+            work[0]["af"],
+            nic, 
+            server=server
+        )
 
+        # Dec on sec, None on failure.
+        if response:
             return 1
     except Exception as e:
         log_exception()
@@ -217,7 +197,6 @@ async def imports_monitor(nic, pending_insert):
 
     # May be empty on failure.
     return imports_list
-
 
 """
 The software can also lookup DNS names to update IPs if they change.

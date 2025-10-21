@@ -320,25 +320,18 @@ def update_table_ip(mem_db, table_type: int, ip: str, alias_id: int, current_tim
 
 def gen_p2pd_legacy_settings(server_cache):
     map_servers = {
-        int(UDP): { int(IP4): [], int(IP6): [] },
-        int(TCP): { int(IP4): [], int(IP6): [] }
+        "UDP": { "IPv4": [], "IPv6": [] },
+        "TCP": { "IPv4": [], "IPv6": [] },
     }
 
     change_servers = {
-        int(UDP): { int(IP4): [], int(IP6): [] },
-        int(TCP): { int(IP4): [], int(IP6): [] },
+        "UDP": { "IPv4": [], "IPv6": [] },
+        "TCP": { "IPv4": [], "IPv6": [] },
     }
 
     mqtt_servers = {} # By id then coverted to list.
 
     turn_servers = {} # By id then coverted to list.
-
-    key_lookup = {
-        "UDP": int(UDP),
-        "TCP": int(TCP),
-        "IPv4": int(IP4),
-        "IPv6": int(IP6),
-    }
 
     # Build STUN "map" servers (RFC 5389)
     for af in server_cache["STUN(see_ip)"]:
@@ -360,9 +353,7 @@ def gen_p2pd_legacy_settings(server_cache):
                         "secondary": {'ip': None, 'port': None}
                     }
 
-                    k_proto = key_lookup[proto]
-                    k_af = key_lookup[af]
-                    map_servers[k_proto][k_af].append(server)
+                    map_servers[proto][af].append(server)
 
     # Build STUN change servers (RFC 3489)
     for af in server_cache["STUN(test_nat)"]:
@@ -385,9 +376,7 @@ def gen_p2pd_legacy_settings(server_cache):
                     }
                 }
 
-                k_proto = key_lookup[proto]
-                k_af = key_lookup[af]
-                change_servers[k_proto][k_af].append(server)
+                change_servers[proto][af].append(server)
 
     # Build MQTT server list.
     mqtt_servers = {}
@@ -411,12 +400,11 @@ def gen_p2pd_legacy_settings(server_cache):
 
                 mqtt_servers[rid]["port"] = group[0]["port"]
 
-                for k_af in (int(IP4), int(IP6)):
+                for k_af in ("IPv4", "IPv6"):
                     if k_af not in mqtt_servers[rid]:
                         mqtt_servers[rid][k_af] = None
 
-                k_af = key_lookup[af]
-                mqtt_servers[rid][k_af] = group[0]["ip"]
+                mqtt_servers[rid][af] = group[0]["ip"]
 
     mqtt_list = d_vals(mqtt_servers)
 
@@ -442,16 +430,16 @@ def gen_p2pd_legacy_settings(server_cache):
 
                 turn_servers[rid]["port"] = group[0]["port"]
 
-                for k_af in (int(IP4), int(IP6)):
+                for k_af in ("IPv4", "IPv6"):
                     if k_af not in turn_servers[rid]:
                         turn_servers[rid][k_af] = None
 
-                k_af = key_lookup[af]
-                turn_servers[rid][k_af] = group[0]["ip"]
+ 
+                turn_servers[rid][af] = group[0]["ip"]
                 if "afs" not in turn_servers[rid]:
                     turn_servers[rid]["afs"] = []
 
-                turn_servers[rid]["afs"].append(k_af)
+                turn_servers[rid]["afs"].append(af)
                 turn_servers[rid]["user"] = group[0]["user"]
                 turn_servers[rid]["pass"] = group[0]["password"]
                 turn_servers[rid]["realm"] = None
@@ -461,7 +449,7 @@ def gen_p2pd_legacy_settings(server_cache):
     change_servers = change_servers
 
     out = rf"""
-STUN_MAP_P2PD = {map_servers}
+STUN_MAP_SERVERS = {map_servers}
 
 STUN_CHANGE_SERVERS = {change_servers}
 
@@ -469,5 +457,15 @@ MQTT_SERVERS = {mqtt_list}
 
 TURN_SERVERS = {turn_list}
     """
+
+    key_lookup = {
+        "'UDP'": "UDP",
+        "'TCP'": "TCP",
+        "'IPv4'": "IP4",
+        "'IPv6'": "IP6",
+    }
+
+    for k in key_lookup:
+        out = out.replace(k, key_lookup[k])
 
     return out
