@@ -92,22 +92,16 @@ async def process_work(nic, curl, table_type=None, stagger=False):
     await sleep_random(100, 4000)
 
     # Execute work from the dealer server.
-    start_time = time.perf_counter()
     is_success, status_ids = await worker(nic, curl, table_type=table_type)
     if is_success == NO_WORK:
         # Between 1 - 5 mins.
         await sleep_random(60000, 300000)
+        return
 
     # Update statuses.
     await async_wrap_errors(
         update_work_status(curl, status_ids, is_success)
     )
-
-    # If work finished too fast -- add a sleep to avoid DoSing server.     
-    exec_elapsed = time.perf_counter() - start_time
-    if exec_elapsed <= 0.5:
-        ms = int(exec_elapsed * 1000)
-        await sleep_random(max(100, 500 - ms), 1000)
 
 async def main(nic=None):
     print("Loading interface...")
@@ -129,9 +123,15 @@ async def main(nic=None):
     tables = (SERVICES_TABLE_TYPE, IMPORTS_TABLE_TYPE, ALIASES_TABLE_TYPE,)
     table = random.choice(tables)
     while 1:
+        start_time = time.perf_counter()
         await async_wrap_errors(
             process_work(nic, curl, table_type=table)
         )
+
+        exec_elapsed = time.perf_counter() - start_time
+        if exec_elapsed <= 0.5:
+            ms = int(exec_elapsed * 1000)
+            await sleep_random(max(100, 500 - ms), 1000)
 
     # Give time for event loop to finish.
     await asyncio.sleep(2)
