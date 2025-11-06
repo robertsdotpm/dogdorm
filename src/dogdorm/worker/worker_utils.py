@@ -70,26 +70,29 @@ async def validate_rfc3489_stun_server(af, proto, nic, primary_tup, secondary_tu
 
     route = nic.route(af)
     pipe = await pipe_open(proto, route=route)
+    try:
+        # Compare IPS in different tups (must be different)
+        if IPR(primary_tup[0], af) == IPR(secondary_tup[0], af):
+            raise Exception("primary and secondary IPs must differ 3489.")
 
-    # Compare IPS in different tups (must be different)
-    if IPR(primary_tup[0], af) == IPR(secondary_tup[0], af):
-        raise Exception("primary and secondary IPs must differ 3489.")
+        # Change port must differ.
+        if primary_tup[1] == secondary_tup[2]:
+            raise Exception("change port must differ 3489")
 
-    # Change port must differ.
-    if primary_tup[1] == secondary_tup[2]:
-        raise Exception("change port must differ 3489")
-
-    # Test each STUN server.
-    for info in infos:
-        dest_ip, dest_port, cip, cport = info
-        await validate_stun_server(
-            ip=dest_ip,
-            port=dest_port,
-            pipe=pipe,
-            mode=RFC3489,
-            cip=cip,
-            cport=cport
-        )
+        # Test each STUN server.
+        for info in infos:
+            dest_ip, dest_port, cip, cport = info
+            await validate_stun_server(
+                ip=dest_ip,
+                port=dest_port,
+                pipe=pipe,
+                mode=RFC3489,
+                cip=cip,
+                cport=cport
+            )
+    finally:
+        if pipe is not None:
+            await pipe.close()
 
 """
 When given an IP for a STUN server we want to know what version
@@ -115,10 +118,10 @@ async def stun_server_classifier(af, ip, port, nic):
     # Mostly RFC3489 is used for NAT checks whick need UDP.
     # Also, its assumed that IPv4 is used since NATs are used there.
     # Though you can also NAT on v6.
+    route = nic.route(af)
+    pipe = await pipe_open(UDP, route=route)
     try:
         # Initial STUN client used to check if a server can support NAT tests.
-        route = nic.route(af)
-        pipe = await pipe_open(UDP, route=route)
         stun_client = STUNClient(
             af=pipe.route.af,
             dest=(ip, port),
@@ -159,6 +162,9 @@ async def stun_server_classifier(af, ip, port, nic):
             ])
     except:
         log_exception()
+    finally:
+        if pipe is not None:
+            await pipe.close()
 
     # We specifically DO NOT add any potential change IPs into map.
     # Otherwise WAN IP lookups can contaminate NAT test results.
