@@ -106,10 +106,22 @@ def build_server_list(mem_db):
             if meta_group.table_type != SERVICES_TABLE_TYPE:
                 continue
 
+            # Avoid local IPs.
+            group = list_x_to_dict(meta_group.group)
+            localhosts = ("127.0.0.1", "0000:0000:0000:0000:0000:0000:0000:0001",)
+            skip_group = False
+            for record in group:
+                if record["ip"] in localhosts:
+                    skip_group = True
+                    break
+            
+            # Skip group with junk in it.
+            if skip_group:
+                continue
+
             # Combine associated status fields with record table field.
             scores = []
             fields = ("test_no", "failed_tests", "uptime", "max_uptime", "last_success")
-            group = list_x_to_dict(meta_group.group)
             for record in group:
                 # Invalid records should not break the entire attempt.
                 try:
