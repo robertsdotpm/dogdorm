@@ -7,7 +7,7 @@ import os
 WORKER_TIMEOUT = 120
 
 # Servers are checked this often.
-MONITOR_FREQUENCY = 60 * 60
+MONITOR_FREQUENCY = 60 * 60 * 4
 
 # DNS IPs for services are only updated after N secs of downtime.
 MAX_SERVER_DOWNTIME = 600
