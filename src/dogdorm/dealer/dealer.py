@@ -68,7 +68,6 @@ async def refresh_server_cache():
             await save_all(mem_db)
         except:
             log_exception()
-            exit(0) # Don't continue in invalid state.
 
         await asyncio.sleep(60)
 

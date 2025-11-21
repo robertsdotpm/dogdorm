@@ -64,8 +64,10 @@ def insert_from_lines(af, import_type, lines, db):
         except DuplicateRecordError: # ignore really.
             #log_exception()
             pass
+        except KeyError:
+            pass
         except:
-            what_exception()
+            log_exception()
 
     return import_list
 
