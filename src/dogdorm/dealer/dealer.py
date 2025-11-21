@@ -41,7 +41,6 @@ async def save_all(mem_db):
             await delete_all_data(sqlite_db)
             await sqlite_export(mem_db, sqlite_db)
         except Exception:
-            what_exception()
             log_exception()
             await sqlite_db.rollback()
             raise
@@ -69,6 +68,8 @@ async def refresh_server_cache():
             await save_all(mem_db)
         except:
             log_exception()
+            exit(0) # Don't continue in invalid state.
+
         await asyncio.sleep(60)
 
 # Since the API is mostly dynamic tell browsers not to cache it.
@@ -184,7 +185,6 @@ def api_insert_services(payload: InsertServicesReq):
 
             mem_db.add_work(records[0].af, SERVICES_TABLE_TYPE, records)
         except DuplicateRecordError:
-            log_exception()
             continue
 
     # Only allocate imports work once.

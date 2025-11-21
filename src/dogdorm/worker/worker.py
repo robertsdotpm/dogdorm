@@ -140,4 +140,6 @@ async def main(nic=None):
 maybe the workers were running out of sockets due to those old bugs.
 Or some other error from long running processes. They could periodically
 restart every day of uptime for a worker so they get a clean slate.
+
+need to add timeouts to worker stuff
 """

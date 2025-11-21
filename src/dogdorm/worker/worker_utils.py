@@ -1,6 +1,11 @@
 import httpx
 from p2pd import *
 from ..defs import *
+import logging
+
+# Silence all httpx/httpcore debug output
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 """
 P2PD allows message replies to be filtered by specific IP or ports.
@@ -69,7 +74,7 @@ async def validate_rfc3489_stun_server(af, proto, nic, primary_tup, secondary_tu
     ]
 
     route = nic.route(af)
-    pipe = await pipe_open(proto, route=route)
+    pipe = await Pipe(proto, None, route).connect()
     try:
         # Compare IPS in different tups (must be different)
         if IPR(primary_tup[0], af) == IPR(secondary_tup[0], af):
@@ -119,7 +124,7 @@ async def stun_server_classifier(af, ip, port, nic):
     # Also, its assumed that IPv4 is used since NATs are used there.
     # Though you can also NAT on v6.
     route = nic.route(af)
-    pipe = await pipe_open(UDP, route=route)
+    pipe = await Pipe(UDP, None, route).connect()
     try:
         # Initial STUN client used to check if a server can support NAT tests.
         stun_client = STUNClient(

@@ -62,7 +62,8 @@ def insert_from_lines(af, import_type, lines, db):
             import_list.append(record)
             db.add_work(af, IMPORTS_TABLE_TYPE, [record])
         except DuplicateRecordError: # ignore really.
-            log_exception()
+            #log_exception()
+            pass
         except:
             what_exception()
 

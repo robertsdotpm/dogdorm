@@ -89,7 +89,7 @@ async def sqlite_export(mem_db, sqlite_db):
             try:
                 await insert_object(sqlite_db, table_name, entry)
             except sqlite3.IntegrityError as e:
-                what_exception()
+                #what_exception()
                 continue
             except:
                 log_exception()
