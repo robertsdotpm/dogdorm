@@ -1,4 +1,3 @@
-import asyncio
 from p2pd import *
 from ..defs import *
 from .worker_utils import *
@@ -77,127 +76,32 @@ add IPv6 in the future, but in practice there are almost no IPv6 public
 TURN servers. So this is a low priority for now.
 """
 async def monitor_turn_type(nic, work):
-    """End-to-end TURN check: ALLOCATE + CreatePermission + relay round-trip.
-
-    The earlier shape only verified ALLOCATE -- a server could happily
-    hand out a relay tup and still drop traffic at the CreatePermission
-    or relay-forward stages. p2pd's flake-tracing showed exactly this:
-    a server (47.96.130.35 / gitclone.com) kept its score >= 0.89 in
-    servers.json while it was actually broken at the relay stage,
-    because the monitor never sent a byte across it.
-
-    Full check: spin up two TURNClient instances against this server,
-    cross-register them as each other's peer, send a probe payload
-    from A -> B and wait for B to receive it. Each phase is bounded
-    so a hung server can't eat the worker budget.
-
-    Phase return codes (0 == fail, 1 == ok); the caller stores 1/0.
-    The exact failing phase is logged via log() so the dealer's
-    history shows where servers commonly break (allocate vs
-    create-permission vs relay-recv).
-    """
+    # Not all TURN servers need a username or password.
     user = "" if work[0]["user"] is None else work[0]["user"]
     password = "" if work[0]["password"] is None else work[0]["password"]
-    server_label = "{0}:{1}".format(work[0]["ip"], work[0]["port"])
 
-    payload = b"DOGDORM-TURN-PROBE"
-    received = asyncio.Event()
-    received_data = []
-
-    def on_b_msg(msg, client_tup, pipe):
-        received_data.append(msg)
-        if msg and payload in msg:
-            received.set()
-
-    client_a = TURNClient(
+    # Try to get a working reference to the client.
+    client = await TURNClient(
         af=work[0]["af"],
         dest=(work[0]["ip"], work[0]["port"]),
         nic=nic,
         auth=(user, password),
-        realm=None,
-    )
-    client_b = TURNClient(
-        af=work[0]["af"],
-        dest=(work[0]["ip"], work[0]["port"]),
-        nic=nic,
-        auth=(user, password),
-        realm=None,
-        msg_cb=on_b_msg,
+
+        # No realm support for now. Most don't set it.
+        realm=None
     )
 
-    try:
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(client_a.start(), client_b.start()),
-                timeout=15,
-            )
-        except asyncio.TimeoutError:
-            log("TURN monitor {0} fail phase=allocate".format(server_label))
-            return 0
-        except (OSError, ConnectionError):
-            log_exception()
-            log("TURN monitor {0} fail phase=allocate-os".format(server_label))
-            return 0
+    # Check client was set.
+    if client:
+        # Server returns our IP and relay address on allocation success.
+        r_addr, r_relay = await client.get_tups()
+        await client.close()
 
-        try:
-            a_peer = await client_a.client_tup_future
-            a_relay = await client_a.relay_tup_future
-            b_peer = await client_b.client_tup_future
-            b_relay = await client_b.relay_tup_future
-        except (asyncio.CancelledError):
-            raise
-        except Exception:
-            log_exception()
-            log("TURN monitor {0} fail phase=tup-future".format(server_label))
-            return 0
+        # Return success if those fields were set.
+        if None not in (r_addr, r_relay):
+            return 1
 
-        if None in (a_peer, a_relay, b_peer, b_relay):
-            log("TURN monitor {0} fail phase=tup-missing".format(server_label))
-            return 0
-
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(
-                    client_a.accept_peer(b_peer, b_relay),
-                    client_b.accept_peer(a_peer, a_relay),
-                ),
-                timeout=10,
-            )
-        except asyncio.TimeoutError:
-            log("TURN monitor {0} fail phase=create-permission".format(server_label))
-            return 0
-        except (OSError, ConnectionError):
-            log_exception()
-            log("TURN monitor {0} fail phase=create-permission-os".format(server_label))
-            return 0
-
-        try:
-            await client_a.send(payload, dest_tup=b_peer)
-        except (OSError, ConnectionError, ValueError):
-            log_exception()
-            log("TURN monitor {0} fail phase=send".format(server_label))
-            return 0
-
-        try:
-            await asyncio.wait_for(received.wait(), timeout=8)
-        except asyncio.TimeoutError:
-            log("TURN monitor {0} fail phase=relay-recv (got={1} chunks)".format(
-                server_label, len(received_data),
-            ))
-            return 0
-
-        if not any(payload in m for m in received_data if m):
-            log("TURN monitor {0} fail phase=relay-payload-missing".format(server_label))
-            return 0
-
-        log("TURN monitor {0} ok".format(server_label))
-        return 1
-    finally:
-        for c in (client_a, client_b):
-            try:
-                await asyncio.wait_for(c.close(), timeout=5)
-            except Exception:
-                pass
+    return 0
 
 """
 NTP is a protocol to try to maintain somewhat accurate, universal time,
