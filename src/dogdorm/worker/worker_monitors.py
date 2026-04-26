@@ -1,3 +1,5 @@
+import asyncio
+import random
 from p2pd import *
 from ..defs import *
 from .worker_utils import *
@@ -76,32 +78,78 @@ add IPv6 in the future, but in practice there are almost no IPv6 public
 TURN servers. So this is a low priority for now.
 """
 async def monitor_turn_type(nic, work):
-    # Not all TURN servers need a username or password.
+    """Verify ALLOCATE + CreatePermission against this TURN server.
+
+    Coturn (which basically every public TURN deploy uses) rejects
+    relays whose peer matches the client's own source IP, so we
+    can't usefully test the "relay actually forwards a payload"
+    stage from a single worker. The next-best signal is whether
+    the server accepts a CreatePermission for a *different* IP --
+    that exercises the post-ALLOCATE STUN message path and catches
+    servers whose ALLOCATE succeeds while CreatePermission silently
+    drops or returns an error.
+
+    A random public IPv4 is used as the dummy peer. The server
+    never tries to reach it; it just records the permission.
+    """
     user = "" if work[0]["user"] is None else work[0]["user"]
     password = "" if work[0]["password"] is None else work[0]["password"]
 
-    # Try to get a working reference to the client.
     client = await TURNClient(
         af=work[0]["af"],
         dest=(work[0]["ip"], work[0]["port"]),
         nic=nic,
         auth=(user, password),
-
-        # No realm support for now. Most don't set it.
-        realm=None
+        realm=None,
     )
 
-    # Check client was set.
-    if client:
-        # Server returns our IP and relay address on allocation success.
+    if not client:
+        return 0
+
+    try:
         r_addr, r_relay = await client.get_tups()
-        await client.close()
+        if None in (r_addr, r_relay):
+            return 0
 
-        # Return success if those fields were set.
-        if None not in (r_addr, r_relay):
-            return 1
+        # Pick a random public IPv4 as the dummy peer. We never send
+        # data there -- the server just stores the permission. Avoid
+        # the documentation blocks (192.0.2/24, 198.51.100/24,
+        # 203.0.113/24) since some operators denylist them, and avoid
+        # private / loopback / multicast / 0.0.0.0 ranges by clamping
+        # the first octet.
+        first = random.choice([1, 4, 5, 8, 12, 13, 14, 15, 16, 17,
+                               18, 19, 20, 23, 24, 31, 50, 64, 65,
+                               66, 67, 68, 69, 70, 80, 96])
+        fake_peer = (
+            "{0}.{1}.{2}.{3}".format(
+                first,
+                random.randint(0, 255),
+                random.randint(0, 255),
+                random.randint(1, 254),
+            ),
+            random.randint(20000, 60000),
+        )
+        # peer_relay_tup is stored but never used by us; pass the
+        # server's own (ip, fake_port) tuple to keep the shape valid.
+        fake_relay = (work[0]["ip"], random.randint(20000, 60000))
 
-    return 0
+        try:
+            await asyncio.wait_for(
+                client.accept_peer(fake_peer, fake_relay),
+                timeout=10,
+            )
+        except asyncio.TimeoutError:
+            return 0
+        except (OSError, ConnectionError, ValueError):
+            log_exception()
+            return 0
+
+        return 1
+    finally:
+        try:
+            await asyncio.wait_for(client.close(), timeout=5)
+        except Exception:
+            pass
 
 """
 NTP is a protocol to try to maintain somewhat accurate, universal time,
