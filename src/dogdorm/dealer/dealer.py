@@ -15,6 +15,7 @@ cached as a string ready to be returned instantly.
 
 import aiosqlite
 from fastapi import FastAPI, Depends, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, PlainTextResponse
 from p2pd import *
 from typing import List
@@ -28,6 +29,15 @@ from ..db.mem_db_utils import *
 from ..db.mem_db import *
 
 app = FastAPI(default_response_class=PrettyJSONResponse)
+
+# Allow any origin to fetch the JSON API from a browser (e.g. embedding
+# /servers on a third-party site) without CORS errors.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "OPTIONS"],
+    allow_headers=["*"],
+)
 mem_db = MemDB()
 server_cache = {}
 server_list_str = ""
