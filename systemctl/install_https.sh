@@ -1,0 +1,126 @@
+#!/bin/bash
+#
+# Serve the dealer over HTTPS by putting Apache in front of it.
+#
+# The dealer speaks plain HTTP and only that (see dealer/__main__.py). Rather
+# than teach it TLS -- which would mean handing the Python process a copy of
+# a private key, and bouncing the dealer and all its workers every time the
+# certificate renews -- this points an Apache vhost at it on an HTTPS port.
+# Certbot already knows how to renew the certificate and reload Apache, so
+# once this is installed there is nothing left to maintain.
+#
+# The certificate must already exist. To get one for a name that this
+# machine answers on port 80 for:
+#
+#   sudo certbot certonly --webroot -w /var/www/html -d your.domain
+#
+# Usage:
+#
+#   ./install_https.sh <domain> [https_port] [backend]
+#
+# e.g. ./install_https.sh warpgate.io 8001 127.0.0.1:8000
+#
+# Run it once per domain you want to answer on. Domains sharing a port are
+# told apart by SNI, so several can point at the same dealer.
+
+set -e
+
+# apache2ctl and the a2* helpers live in sbin, which is not on a normal
+# user's PATH on Debian.
+PATH="$PATH:/usr/sbin:/sbin"
+
+if [ "$EUID" -eq 0 ]; then
+    echo "Error: Do not run this script as root."
+    echo "Please run as a normal user (it will sudo where it needs to)."
+    exit 1
+fi
+
+DOMAIN="$1"
+HTTPS_PORT="${2:-8001}"
+BACKEND="${3:-127.0.0.1:8000}"
+
+if [ -z "$DOMAIN" ]; then
+    echo "usage: $0 <domain> [https_port] [backend host:port]"
+    exit 1
+fi
+
+CERT_DIR="/etc/letsencrypt/live/$DOMAIN"
+LISTEN_CONF="/etc/apache2/conf-available/dogdorm-listen-$HTTPS_PORT.conf"
+SITE_NAME="dogdorm-https-$DOMAIN"
+SITE_FILE="/etc/apache2/sites-available/$SITE_NAME.conf"
+
+if ! command -v apache2ctl >/dev/null 2>&1; then
+    echo "Error: Apache is not installed on this machine."
+    exit 1
+fi
+
+if ! sudo test -s "$CERT_DIR/fullchain.pem"; then
+    echo "Error: no certificate at $CERT_DIR."
+    echo "Get one first, e.g.:"
+    echo "  sudo certbot certonly --webroot -w /var/www/html -d $DOMAIN"
+    exit 1
+fi
+
+# A certificate usually covers more than the one name asked for (the www.
+# form, most often). Serve every name on it, or a request for one of the
+# others falls through to whichever vhost happens to be first on this port
+# and gets handed the wrong certificate.
+ALIASES=$(sudo openssl x509 -in "$CERT_DIR/fullchain.pem" -noout -ext subjectAltName \
+    | tr ',' '\n' | sed -n 's/.*DNS://p' | tr -d ' ' | grep -vx "$DOMAIN" | tr '\n' ' ')
+ALIASES="${ALIASES% }"
+
+echo "Enabling the modules the vhost needs..."
+sudo a2enmod -q ssl proxy proxy_http
+
+# The Listen lives in its own file keyed by port, so that installing a second
+# domain on the same port doesn't try to bind it twice (which Apache treats
+# as fatal).
+echo "Listening on $HTTPS_PORT..."
+sudo tee "$LISTEN_CONF" > /dev/null <<EOF
+# Added by dogdorm's install_https.sh -- the port the dealer is served on.
+<IfModule ssl_module>
+    Listen $HTTPS_PORT
+</IfModule>
+EOF
+sudo a2enconf -q "dogdorm-listen-$HTTPS_PORT"
+
+echo "Creating vhost for $DOMAIN${ALIASES:+ (also serving: $ALIASES)}..."
+sudo tee "$SITE_FILE" > /dev/null <<EOF
+# Added by dogdorm's install_https.sh. HTTPS front end for the dealer, which
+# is itself listening on $BACKEND over plain HTTP.
+<IfModule ssl_module>
+<VirtualHost *:$HTTPS_PORT>
+    ServerName $DOMAIN
+${ALIASES:+    ServerAlias $ALIASES}
+
+    Include /etc/letsencrypt/options-ssl-apache.conf
+    SSLCertificateFile $CERT_DIR/fullchain.pem
+    SSLCertificateKeyFile $CERT_DIR/privkey.pem
+
+    # The dealer builds no absolute URLs of its own, but FastAPI redirects
+    # /servers/ to /servers, and the Location it sends back has to be
+    # rewritten to point at this vhost. Leaving ProxyPreserveHost off is what
+    # makes that work: the dealer then names the backend in its Location
+    # header, ProxyPassReverse recognises it, and the client is sent to
+    # https://<whatever name it asked for>:$HTTPS_PORT. Preserving the
+    # original Host instead would have the dealer emit the right host with
+    # the wrong scheme -- plain http, pointed at this TLS port.
+    ProxyPreserveHost Off
+    ProxyPass / http://$BACKEND/
+    ProxyPassReverse / http://$BACKEND/
+
+    ErrorLog \${APACHE_LOG_DIR}/dogdorm-$DOMAIN-error.log
+    CustomLog \${APACHE_LOG_DIR}/dogdorm-$DOMAIN-access.log combined
+</VirtualHost>
+</IfModule>
+EOF
+sudo a2ensite -q "$SITE_NAME"
+
+echo "Checking the config..."
+sudo apache2ctl configtest
+
+echo "Reloading Apache..."
+sudo systemctl reload apache2
+
+echo "Done. Try: curl https://$DOMAIN:$HTTPS_PORT/servers"
+echo "Remove with: sudo a2dissite $SITE_NAME && sudo systemctl reload apache2"

@@ -78,3 +78,33 @@ inside the systemctl/ directory.
 The install script enables this monitor to auto start when you reboot your
 server. By default the workers check for work every hour so this should
 require minimal network traffic. 
+
+# HTTPS
+
+The dealer speaks plain HTTP. If you want it reachable over HTTPS -- browsers
+will refuse to fetch the JSON API from a page served over TLS otherwise -- put
+Apache in front of it on a second port. The script in systemctl/ does that:
+
+**./install_https.sh warpgate.io 8001**
+
+It writes an Apache vhost that listens on 8001 with the Let's Encrypt
+certificate for that domain and proxies everything to the dealer on
+127.0.0.1:8000. The certificate has to exist already; if you don't have one:
+
+**sudo certbot certonly --webroot -w /var/www/html -d your.domain**
+
+Run the script once per name you want to answer on. Names sharing a port are
+told apart by SNI, so one dealer can serve several -- the P2PD dealer answers
+on both of these, and they return the same list:
+
+https://warpgate.io:8001/servers
+
+https://ovh1.p2pd.net:8001/servers
+
+Nothing else is needed for renewals. Certbot reloads Apache when it renews,
+and Apache is the only thing holding the private key -- the dealer never sees
+it, and neither the dealer nor its 100 workers have to be restarted.
+
+Two things worth checking on your own box: that the HTTPS port is open in the
+firewall, and that port 80 stays reachable for whichever name you asked for a
+certificate for, since that's how renewal proves you still own it.
