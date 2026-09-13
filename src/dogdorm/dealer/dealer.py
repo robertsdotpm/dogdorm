@@ -16,7 +16,7 @@ cached as a string ready to be returned instantly.
 import aiosqlite
 from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, PlainTextResponse
+from fastapi.responses import Response, PlainTextResponse, RedirectResponse
 from p2pd import *
 from typing import List
 from pprint import pformat
@@ -229,6 +229,16 @@ def api_update_alias(data: AliasUpdateReq):
         update_table_ip(mem_db, table_type, ip, alias_id, current_time)
 
     return []
+
+# Nothing here is meant to be read by a person, so send them to the
+# dashboard that is. Temporary on purpose: a permanent redirect would be
+# cached by browsers long after an operator changed ROOT_REDIRECT.
+@app.get("/")
+def api_index():
+    if ROOT_REDIRECT:
+        return RedirectResponse(ROOT_REDIRECT, status_code=302)
+
+    return PlainTextResponse("dogdorm dealer. The server list is at /servers\n")
 
 # Show a listing of servers based on quality
 # Only public API is this one.

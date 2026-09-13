@@ -15,6 +15,14 @@ MAX_SERVER_DOWNTIME = 600
 # Try to import items 3 times then stop.
 IMPORT_TEST_NO = 3 
 
+# Where a browser landing on "/" gets sent. What the dealer serves is JSON
+# meant for other programs; the dashboard is the readable view of the same
+# data. Set it to "" to leave "/" alone, or point it at your own page.
+ROOT_REDIRECT = os.environ.get(
+    "DOGDORM_ROOT_REDIRECT",
+    "https://www.warpgate.io/netstats.html",
+)
+
 """
 Manually cache your NIC details here using
 python3 -m p2pd
