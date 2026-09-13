@@ -105,6 +105,19 @@ ${ALIASES:+    ServerAlias $ALIASES}
     # https://<whatever name it asked for>:$HTTPS_PORT. Preserving the
     # original Host instead would have the dealer emit the right host with
     # the wrong scheme -- plain http, pointed at this TLS port.
+    # Only the read-only routes are reachable from out here. The dealer's
+    # own guard on /work, /insert, /complete and /alias works by looking at
+    # the client address, which behind a proxy is whatever the proxy says it
+    # is -- correct today only because uvicorn rewrites it from the header
+    # Apache appends. That is one flag away from being wrong, so the routes
+    # that must never be public are refused before they reach the dealer.
+    <Location "/">
+        Require all denied
+    </Location>
+    <LocationMatch "^/(servers|legacy)?/?$">
+        Require all granted
+    </LocationMatch>
+
     ProxyPreserveHost Off
     ProxyPass / http://$BACKEND/
     ProxyPassReverse / http://$BACKEND/
