@@ -56,8 +56,17 @@ async def worker(nic, curl, init_work=None, table_type=None):
                 await retry_curl_on_locked(curl, params, "/insert")
 
                 print("Found -- importing new servers")
-            else:
-                print("Not importing.")
+
+                """
+                /insert marks this work complete itself. Reporting it again
+                through /complete would count the same attempt twice.
+                """
+                return 1, []
+
+            # Nothing importable. Say so, so it is retried up to
+            # IMPORT_TEST_NO times instead of being retired after one go.
+            print("Not importing.")
+            is_success = 0
 
         if table_type == SERVICES_TABLE_TYPE:
             is_success = await service_monitor(nic, work)
@@ -77,12 +86,25 @@ async def worker(nic, curl, init_work=None, table_type=None):
                 params = {"alias_id": int(work[0]["id"]), "ip": res_ip}
                 await retry_curl_on_locked(curl, params, "/alias")
                 print("Resolved -- updating IPs", status_ids)
+                is_success = 1
             else:
                 print("No IP found for DNS -- not updating ", status_ids)
+                is_success = 0
         
 
+        """
+        Report what actually happened.
+
+        This used to return 1 whatever the checks found, throwing away the
+        is_success just computed above. A monitor that reports a failure by
+        returning 0 rather than raising -- NTP, MQTT, a STUN server that
+        answers nothing -- was therefore recorded as a success: the server's
+        last_success was bumped by the very check that found it offline. On
+        the P2PD monitor that left NTP with zero failures across 66,458
+        checks and every one of them scoring a perfect 1.0.
+        """
         print("Work status updated.")
-        return 1, status_ids
+        return is_success, status_ids
     except:
         what_exception()
         log_exception()
