@@ -22,6 +22,8 @@ http://ovh1.p2pd.net:8000/servers -- Live list of monitored servers
 
 https://www.warpgate.io/netstats.html -- New front-end for server list
 
+https://www.warpgate.io/servers.json -- The same list on the standard HTTPS port
+
 # Install
 
 Clone the repo to your comp and edit defs.py in src/dogdorm to
