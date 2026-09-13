@@ -18,7 +18,8 @@ After the dealer server is started you can view the server list sorted by
 most reliable server. Bellow is the URL for the P2PD dealer server as
 an example of what the results look like.
 
-http://ovh1.p2pd.net:8000/servers
+http://ovh1.p2pd.net:8000/servers -- Live list of monitored servers
+https://www.warpgate.io/netstats.html -- New front-end for server list
 
 # Install
 
