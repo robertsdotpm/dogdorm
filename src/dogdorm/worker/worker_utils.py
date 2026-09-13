@@ -225,7 +225,7 @@ async def retry_curl_on_locked(curl, params, endpoint, retries=3):
             response = await client.post(url, json=params)
 
             # Server down, try again.
-            if response.status_code is not 200:
+            if response.status_code != 200:
                 await sleep_random(1000, 3000)
                 continue
 
@@ -255,13 +255,16 @@ async def fetch_work_list(curl, table_type=None):
         f = lambda r: r["id"]
         work = sorted(work, key=f)
         for grouped in work:
-            if hasattr(grouped, "af"):
+            # hasattr on a dict is always False, so neither of these ever
+            # ran. The values are the same either way (IP4 is 2, UDP is 2),
+            # so this only makes the types what the monitors expect.
+            if "af" in grouped:
                 grouped["af"] = IP4 if grouped["af"] == 2 else IP6
 
-            if hasattr(grouped, "proto"):
+            if "proto" in grouped:
                 grouped["proto"] = UDP if grouped["proto"] == 2 else TCP
     except:
-        print("Could not process server resp as work " + to_s(resp.out))
+        print("Could not process server resp as work " + repr(resp)[:500])
         what_exception()
         return INVALID_SERVER_RESPONSE
 

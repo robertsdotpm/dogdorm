@@ -83,8 +83,9 @@ def insert_main(db):
                 break
 
         if not import_type:
+            # Skip this file, don't abandon every file after it.
             print("Could not determine import type for file: ", import_file)
-            break
+            continue
             
         file_path = os.path.join(IMPORT_ROOT, import_file)
         if not os.path.exists(file_path):

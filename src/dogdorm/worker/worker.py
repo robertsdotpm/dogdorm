@@ -121,8 +121,12 @@ async def main(nic=None):
     is chosen randomly with a bias towards services.
     """
     tables = (SERVICES_TABLE_TYPE, IMPORTS_TABLE_TYPE, ALIASES_TABLE_TYPE,)
-    table = random.choice(tables)
+    weights = (3, 1, 1)
     while 1:
+        # Re-picked every cycle. Choosing once per process meant a worker
+        # that drew the alias queue spent its whole life on that queue, and
+        # slept out its 1-5 minute backoff against it whenever it was empty.
+        table = random.choices(tables, weights=weights)[0]
         start_time = time.perf_counter()
         await async_wrap_errors(
             process_work(nic, curl, table_type=table)
