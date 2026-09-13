@@ -64,7 +64,7 @@ if ss -lnt "sport = :$PUBLIC_PORT" 2>/dev/null | grep -q LISTEN; then
 fi
 
 echo "Enabling the modules the vhost needs..."
-sudo a2enmod -q proxy proxy_http deflate
+sudo a2enmod -q proxy proxy_http deflate headers
 
 echo "Listening on $PUBLIC_PORT..."
 sudo tee "$LISTEN_CONF" > /dev/null <<EOF
@@ -110,6 +110,14 @@ sudo tee "$SITE_FILE" > /dev/null <<EOF
         Require all granted
     </LocationMatch>
 $SERVE_LIST
+
+    # The list was served by the dealer until now, and its CORS middleware
+    # sent this. Serving the file directly means the web server has to, or a
+    # page on another origin -- the netstats dashboard, say -- cannot read it.
+    <IfModule mod_headers.c>
+        Header always set Access-Control-Allow-Origin "*"
+        Header always set Access-Control-Allow-Methods "GET, OPTIONS"
+    </IfModule>
     ProxyPreserveHost Off
     ProxyPass / http://$BACKEND/
     ProxyPassReverse / http://$BACKEND/

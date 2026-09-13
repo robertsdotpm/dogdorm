@@ -76,7 +76,7 @@ ALIASES=$(sudo openssl x509 -in "$CERT_DIR/fullchain.pem" -noout -ext subjectAlt
 ALIASES="${ALIASES% }"
 
 echo "Enabling the modules the vhost needs..."
-sudo a2enmod -q ssl proxy proxy_http deflate
+sudo a2enmod -q ssl proxy proxy_http deflate headers
 
 # The Listen lives in its own file keyed by port, so that installing a second
 # domain on the same port doesn't try to bind it twice (which Apache treats
@@ -145,6 +145,14 @@ ${ALIASES:+    ServerAlias $ALIASES}
     </LocationMatch>
 
 $SERVE_LIST
+
+    # The list was served by the dealer until now, and its CORS middleware
+    # sent this. Serving the file directly means the web server has to, or a
+    # page on another origin -- the netstats dashboard, say -- cannot read it.
+    <IfModule mod_headers.c>
+        Header always set Access-Control-Allow-Origin "*"
+        Header always set Access-Control-Allow-Methods "GET, OPTIONS"
+    </IfModule>
     ProxyPreserveHost Off
     ProxyPass / http://$BACKEND/
     ProxyPassReverse / http://$BACKEND/
