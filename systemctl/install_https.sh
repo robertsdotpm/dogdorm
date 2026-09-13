@@ -70,7 +70,7 @@ ALIASES=$(sudo openssl x509 -in "$CERT_DIR/fullchain.pem" -noout -ext subjectAlt
 ALIASES="${ALIASES% }"
 
 echo "Enabling the modules the vhost needs..."
-sudo a2enmod -q ssl proxy proxy_http
+sudo a2enmod -q ssl proxy proxy_http deflate
 
 # The Listen lives in its own file keyed by port, so that installing a second
 # domain on the same port doesn't try to bind it twice (which Apache treats
@@ -108,6 +108,13 @@ ${ALIASES:+    ServerAlias $ALIASES}
     ProxyPreserveHost Off
     ProxyPass / http://$BACKEND/
     ProxyPassReverse / http://$BACKEND/
+
+    # The server list is most of a megabyte of JSON that gzips to about a
+    # twentieth of that. Debian's deflate.conf lists a handful of text types
+    # and application/json is not among them, so ask for it here.
+    <IfModule mod_deflate.c>
+        AddOutputFilterByType DEFLATE application/json
+    </IfModule>
 
     ErrorLog \${APACHE_LOG_DIR}/dogdorm-$DOMAIN-error.log
     CustomLog \${APACHE_LOG_DIR}/dogdorm-$DOMAIN-access.log combined
