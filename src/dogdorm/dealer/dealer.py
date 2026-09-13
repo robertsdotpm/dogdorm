@@ -20,6 +20,7 @@ from fastapi.responses import Response, PlainTextResponse, RedirectResponse
 from p2pd import *
 from typing import List
 from pprint import pformat
+from contextlib import asynccontextmanager
 import json
 from .dealer_defs import *
 from .dealer_utils import *
@@ -28,7 +29,43 @@ from ..txt_strs import *
 from ..db.mem_db_utils import *
 from ..db.mem_db import *
 
-app = FastAPI(default_response_class=PrettyJSONResponse)
+"""
+Runs once on startup: the sqlite checkpoint is read back into the memory DB
+and the CSV lists in server_lists are merged into it. On the way out the
+memory DB is checkpointed again so a clean stop loses nothing.
+
+(The names used here are defined further down the module; they are looked up
+when this runs, not when it is defined.)
+"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global refresh_task
+    try:
+        await sqlite_import(mem_db)
+
+        # Merge CSV file imports with current mem DB.
+        insert_main(mem_db)
+    except Exception:
+        log_exception()
+
+    refresh_task = asyncio.create_task(refresh_server_cache())
+
+    yield
+
+    print("Server is stopping... cleaning up resources")
+
+    # Stop the periodic checkpoint before taking the final one, so they
+    # cannot both be writing to sqlite at once.
+    if refresh_task is not None:
+        refresh_task.cancel()
+        try:
+            await refresh_task
+        except asyncio.CancelledError:
+            pass
+
+    await save_all(mem_db)
+
+app = FastAPI(default_response_class=PrettyJSONResponse, lifespan=lifespan)
 
 # Allow any origin to fetch the JSON API from a browser (e.g. embedding
 # /servers on a third-party site) without CORS errors.
@@ -38,6 +75,13 @@ app.add_middleware(
     allow_methods=["GET", "OPTIONS"],
     allow_headers=["*"],
 )
+# These handlers are deliberately async rather than plain def. FastAPI runs a
+# non-async handler in a worker thread, which would let two of them mutate the
+# memory DB at the same time -- and alongside the checkpoint task. Async means
+# they run on the one event loop and, since none of them await, each runs to
+# completion before the next starts. That is the atomicity mem_db.py assumes.
+# /legacy stays sync on purpose: it rebuilds a large string and would block
+# the loop, and it only reads.
 mem_db = MemDB()
 server_cache = {}
 server_list_str = ""
@@ -76,7 +120,9 @@ async def refresh_server_cache():
             )
 
             await save_all(mem_db)
-        except:
+        except Exception:
+            # Not a bare except: that also catches the CancelledError used
+            # to stop this task at shutdown.
             log_exception()
 
         await asyncio.sleep(60)
@@ -90,39 +136,9 @@ async def no_cache_middleware(request: Request, call_next):
     response.headers["Expires"] = "0"
     return response
 
-"""
-This function is run once when the dealer is restarted.
-It imports all the records from the sqlite DB into the memory DB.
-It also merges the CSV fields in server_lists into the memory DB.
-"""
-@app.on_event("startup")
-async def main():
-    global refresh_task
-    global mem_db
-    try:
-        await sqlite_import(mem_db)
-
-        # Merge CSV file imports with current mem DB.
-        insert_main(mem_db)
-    except:
-        log_exception()
-
-    refresh_task = asyncio.create_task(refresh_server_cache())
-
-"""
-This hook is run when the server is given a kill signal.
-The server tries to back up the memory DB to disk before exit so nothing
-is lost. The restart.sh script also sends a request to do this before
-it tries to aggressively kill the server.
-"""
-@app.on_event("shutdown")
-async def shutdown_event():
-    print("Server is stopping... cleaning up resources")
-    await save_all(mem_db)
-
 # Hands out work (servers to check) to worker processes.
 @app.post("/work", dependencies=[Depends(localhost_only)])
-def api_get_work(request: GetWorkReq):
+async def api_get_work(request: GetWorkReq):
     # Work can be selected based on type and even address family of server.
     stack_type = request.stack_type
     current_time = request.current_time or int(time.time())
@@ -152,7 +168,7 @@ def api_get_work(request: GetWorkReq):
 
 # Indicate that work has been completed.
 @app.post("/complete", dependencies=[Depends(localhost_only)])
-def api_work_done(payload: WorkDoneReq):
+async def api_work_done(payload: WorkDoneReq):
     results: List[int] = []
     for status_info in payload.statuses:
         try:
@@ -170,7 +186,7 @@ def api_work_done(payload: WorkDoneReq):
 # to start monitoring that new service.
 """
 @app.post("/insert", dependencies=[Depends(localhost_only)])
-def api_insert_services(payload: InsertServicesReq):
+async def api_insert_services(payload: InsertServicesReq):
     # One import can result in learning multiple groups of
     # related servers to start monitoring.
     for groups in payload.imports_list:
@@ -208,7 +224,7 @@ def api_insert_services(payload: InsertServicesReq):
 
 # Special method only called by alias work to update DNS IPs.
 @app.post("/alias", dependencies=[Depends(localhost_only)])
-def api_update_alias(data: AliasUpdateReq):
+async def api_update_alias(data: AliasUpdateReq):
     # Only want public IPs.
     ip = ensure_ip_is_public(data.ip)
     current_time = data.current_time or int(time.time())
@@ -234,7 +250,7 @@ def api_update_alias(data: AliasUpdateReq):
 # dashboard that is. Temporary on purpose: a permanent redirect would be
 # cached by browsers long after an operator changed ROOT_REDIRECT.
 @app.get("/")
-def api_index():
+async def api_index():
     if ROOT_REDIRECT:
         return RedirectResponse(ROOT_REDIRECT, status_code=302)
 
@@ -243,7 +259,7 @@ def api_index():
 # Show a listing of servers based on quality
 # Only public API is this one.
 @app.get("/servers")
-def api_list_servers():
+async def api_list_servers():
     return Response(content=server_list_str, media_type="application/json")
 
 @app.get("/legacy", response_class=PlainTextResponse)
