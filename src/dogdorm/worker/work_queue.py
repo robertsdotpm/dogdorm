@@ -49,19 +49,35 @@ class WorkQueue:
         if work_id in self.index:
             raise KeyError(f"add_work: Work ID {work_id} already added.")
         
-        # All new work is added to the end of the linked-list.
-        # The queue to add it to is based on the status enum.
-        node = self.queues[queue_name].append((work_id, payload))
-        self.index[work_id] = (queue_name, node)
-
         # Recording the time at queue changes is used by the scheduler
         # when deciding if work items are too recent or expired. Restoring a
         # checkpoint passes the time the work was really last touched, so a
         # restart doesn't look like every server was just checked.
-        self.timestamps[work_id] = int(t) if t else int(time.time())
+        ts = int(t) if t else int(time.time())
+        node = self.insert_ordered(queue_name, (work_id, payload), ts)
+        self.index[work_id] = (queue_name, node)
+        self.timestamps[work_id] = ts
+
+    """
+    Place an item so each queue stays in timestamp order.
+
+    The scheduler walks a queue oldest-first and stops at the first item that
+    is not due, which is only right while timestamps never decrease along it.
+    Plain appends kept that true when every timestamp was "now"; a jittered
+    schedule puts some a little in the future, so the item goes where its
+    time belongs. That is nearly always at or close to the end, so the walk
+    starts there and is short.
+    """
+    def insert_ordered(self, queue_name, value, ts):
+        lst = self.queues[queue_name]
+        cur = lst.tail
+        while cur is not None and self.timestamps.get(cur.value[0], 0) > ts:
+            cur = cur.prev
+
+        return lst.insert_after(cur, value)
 
     # Move group given by work_id to destination queue given by status enum.
-    def move_work(self, work_id: Hashable, queue_name: int):
+    def move_work(self, work_id: Hashable, queue_name: int, t=None):
         # Work doesn't exist.
         if work_id not in self.index:
             raise KeyError(f"move_work: Work ID {work_id} doesnt exist.")
@@ -70,10 +86,11 @@ class WorkQueue:
         from_queue, node = self.index[work_id]
         self.queues[from_queue].remove(node)
 
-        # Add to end of target linked_list.
-        new_node = self.queues[queue_name].append(node.value)
+        # Into the target queue at its place in time order.
+        ts = int(t) if t is not None else int(time.time())
+        new_node = self.insert_ordered(queue_name, node.value, ts)
         self.index[work_id] = (queue_name, new_node)
-        self.timestamps[work_id] = int(time.time())
+        self.timestamps[work_id] = ts
 
     def remove_work(self, work_id: Hashable):
         queue_name, node = self.index.pop(work_id)

@@ -1,3 +1,4 @@
+import random
 from dataclasses import asdict, fields, is_dataclass
 from collections import OrderedDict
 import aiosqlite
@@ -191,7 +192,13 @@ async def sqlite_import(mem_db):
             if queue == STATUS_DEALT:
                 queue = STATUS_AVAILABLE
 
-            restored.append((status.last_status or 0, group_id, group, queue))
+            # A restart re-draws the offset, so a fleet that went quiet
+            # together comes back spread out rather than all due at once.
+            last = status.last_status or 0
+            if queue == STATUS_AVAILABLE and last:
+                last = int(last + random.uniform(-SCHEDULE_JITTER, SCHEDULE_JITTER) * MONITOR_FREQUENCY)
+
+            restored.append((last, group_id, group, queue))
 
         restored.sort(key=lambda item: item[0])
         for last_touched, group_id, group, queue in restored:

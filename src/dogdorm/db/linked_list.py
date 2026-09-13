@@ -43,6 +43,22 @@ class LinkedList:
         self.count += 1
         return node
 
+    def insert_after(self, node, value):
+        """Insert value after node, or at the start if node is None."""
+        if node is None:
+            return self.prepend(value)
+
+        if node is self.tail:
+            return self.append(value)
+
+        new = Node(value)
+        new.prev = node
+        new.next = node.next
+        node.next.prev = new
+        node.next = new
+        self.count += 1
+        return new
+
     def remove(self, node):
         """Remove a node in O(1). Raises if node is invalid."""
         if not isinstance(node, Node):

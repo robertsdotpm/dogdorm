@@ -14,6 +14,17 @@ WORK_TIMEOUT = WORKER_TIMEOUT - 30
 # Servers are checked this often.
 MONITOR_FREQUENCY = 60 * 60 * 4
 
+"""
+Each next check lands anywhere within this fraction of MONITOR_FREQUENCY
+either side of it -- three to five hours for a four hour frequency.
+
+Without it, servers checked together stay together: anything that makes the
+whole fleet due at once (a first start, catching up after an outage) turns
+into the same burst every four hours from then on. A random offset each time
+smears them out over a few cycles, and the average frequency stays the same.
+"""
+SCHEDULE_JITTER = 0.25
+
 # DNS IPs for services are only updated after N secs of downtime.
 MAX_SERVER_DOWNTIME = 600
 

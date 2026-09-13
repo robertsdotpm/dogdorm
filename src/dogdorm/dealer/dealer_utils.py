@@ -1,4 +1,5 @@
 import math
+import random
 import time
 import json
 from fastapi.responses import JSONResponse
@@ -200,6 +201,11 @@ def is_retired(status, t):
     # Never answered once. Judge it on how many attempts it has had.
     return status.test_no >= RETIRE_NEVER_AFTER_TESTS
 
+# When work next becomes due is its queue time plus MONITOR_FREQUENCY, so
+# shifting the queue time shifts the check. last_status keeps the real time.
+def jittered(t):
+    return int(t + random.uniform(-SCHEDULE_JITTER, SCHEDULE_JITTER) * MONITOR_FREQUENCY)
+
 def mark_complete(mem_db, is_success: int, status_id: int, t=None):
     # Work starts out with the target of being reassigned available.
     t = t or int(time.time())
@@ -254,7 +260,13 @@ def mark_complete(mem_db, is_success: int, status_id: int, t=None):
             status_type = STATUS_DISABLED
 
     # Try to move work to available -- throw exception if not exist.
-    mem_db.work[table_type][af].move_work(group_id, status_type)
+    # When it is going back to wait for its next check, that check lands
+    # somewhere either side of the usual frequency (see SCHEDULE_JITTER).
+    queue_t = None
+    if status_type == STATUS_AVAILABLE:
+        queue_t = jittered(t)
+
+    mem_db.work[table_type][af].move_work(group_id, status_type, t=queue_t)
 
     # Update work with the new status.
     status.status = status_type
