@@ -108,7 +108,7 @@ class MemDB():
         if alias in self.aliases_by_ip[alias.ip]:
             self.aliases_by_ip[alias.ip].remove(alias)
 
-    def add_work(self, af: int, table_type: int, group: Any, group_id=None, status_type=STATUS_INIT):
+    def add_work(self, af: int, table_type: int, group: Any, group_id=None, status_type=STATUS_INIT, t=None):
         # Save this as a new "group".
         group_id = group_id or self.get_id(GROUPS_TABLE_TYPE)
         meta_group = MetaGroup(**{
@@ -120,7 +120,7 @@ class MemDB():
         self.groups[group_id] = meta_group
 
         # Add group to work queue LOG(1).
-        self.work[table_type][af].add_work(group_id, meta_group, status_type)
+        self.work[table_type][af].add_work(group_id, meta_group, status_type, t=t)
 
         # Add group id field.
         for member in group:

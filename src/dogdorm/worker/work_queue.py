@@ -44,7 +44,7 @@ class WorkQueue:
 
     # Work items are groups of one or more servers indexed by unique group_ids.
     # The group_ids are just increasingly counts on new group.
-    def add_work(self, work_id: Hashable, payload: Any, queue_name: int):
+    def add_work(self, work_id: Hashable, payload: Any, queue_name: int, t=None):
         # Avoid overwriting pre-existing work.
         if work_id in self.index:
             raise KeyError(f"add_work: Work ID {work_id} already added.")
@@ -55,8 +55,10 @@ class WorkQueue:
         self.index[work_id] = (queue_name, node)
 
         # Recording the time at queue changes is used by the scheduler
-        # when deciding if work items are too recent or expired.
-        self.timestamps[work_id] = int(time.time())
+        # when deciding if work items are too recent or expired. Restoring a
+        # checkpoint passes the time the work was really last touched, so a
+        # restart doesn't look like every server was just checked.
+        self.timestamps[work_id] = int(t) if t else int(time.time())
 
     # Move group given by work_id to destination queue given by status enum.
     def move_work(self, work_id: Hashable, queue_name: int):
@@ -79,10 +81,12 @@ class WorkQueue:
         self.timestamps.pop(work_id, None)
 
     def pop_available(self):
-        node = self.queues[STATUS_AVAILABLE].popleft()
-        if not node:
+        # popleft raises on an empty list, so ask first -- the old guard here
+        # tested the returned Node, which is never falsy.
+        if not self.queues[STATUS_AVAILABLE]:
             return None
-        
+
+        node = self.queues[STATUS_AVAILABLE].popleft()
         work_id, payload = node.value
         self.index.pop(work_id, None)
         self.timestamps.pop(work_id, None)

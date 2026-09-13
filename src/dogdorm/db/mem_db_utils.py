@@ -12,10 +12,20 @@ Dynamically exports a dataclass to an sqlite table.
 Uses schema lookups to only insert the fields that overlap.
 Used for export to sqlite.
 """
+# The schema doesn't change while we run, and the export walks thousands of
+# rows a minute -- asking sqlite once per row was most of the work.
+_SCHEMA_CACHE = {}
+
+async def table_columns(db, table):
+    if table not in _SCHEMA_CACHE:
+        async with db.execute(f"PRAGMA table_info({table})") as cursor:
+            _SCHEMA_CACHE[table] = {row[1] async for row in cursor}
+
+    return _SCHEMA_CACHE[table]
+
 async def insert_object(db, table, obj):
     # Load the tables schema.
-    async with db.execute(f"PRAGMA table_info({table})") as cursor:
-        columns = {row[1] async for row in cursor}  
+    columns = await table_columns(db, table)
 
     # Create key: value mappings for only the keys that match the schema.
     data = asdict(obj) if hasattr(obj, "__dataclass_fields__") else vars(obj)
@@ -36,8 +46,7 @@ given dataclass definition.
 """
 async def load_objects(db, table, cls, where_clause: str = None, where_args: tuple = ()):
     # Load the table's schema.
-    async with db.execute(f"PRAGMA table_info({table})") as cursor:
-        db_cols = {row[1] async for row in cursor}
+    db_cols = await table_columns(db, table)
 
     # Get fields within the cls describing the import data.
     if is_dataclass(cls):
@@ -154,8 +163,43 @@ async def sqlite_import(mem_db):
 
     # Rebuild meta_group structure for services.
     for table_type in group_maps:
+        """
+        Work used to go back on the INIT queue no matter what it was doing
+        when we checkpointed, and INIT is handed out with no time check at
+        all -- so every restart re-probed every server at once, ignoring
+        MONITOR_FREQUENCY, and imports that had been retired to DISABLED came
+        back to be retried again.
+
+        allocate_work also walks each queue oldest-first and stops at the
+        first item too recent to re-run, so the queues have to be rebuilt in
+        the order the work was last touched rather than by row id.
+        """
+        restored = []
         for group_id in group_maps[table_type]:
             group = group_maps[table_type][group_id]
-            status_id = group[0].status_id
-            status = mem_db.statuses[status_id].status
-            mem_db.add_work(group[0].af, table_type, group, group_id, STATUS_INIT)
+            status = mem_db.statuses.get(group[0].status_id)
+
+            # No status row means it has never been checked: let it run now.
+            if status is None:
+                restored.append((0, group_id, group, STATUS_INIT))
+                continue
+
+            queue = status.status
+
+            # Whoever held dealt work did not survive the restart, so put it
+            # back up for grabs rather than waiting out the worker timeout.
+            if queue == STATUS_DEALT:
+                queue = STATUS_AVAILABLE
+
+            restored.append((status.last_status or 0, group_id, group, queue))
+
+        restored.sort(key=lambda item: item[0])
+        for last_touched, group_id, group, queue in restored:
+            mem_db.add_work(
+                group[0].af,
+                table_type,
+                group,
+                group_id,
+                queue,
+                t=last_touched or None
+            )
