@@ -45,7 +45,7 @@ async def worker(nic, curl, init_work=None, table_type=None):
         ))
 
         if table_type == IMPORTS_TABLE_TYPE:
-            imports_list = await imports_monitor(nic, work)
+            imports_list = await bounded(imports_monitor(nic, work), WORK_TIMEOUT)
 
             # Otherwise do imports.
             if imports_list:
@@ -69,7 +69,7 @@ async def worker(nic, curl, init_work=None, table_type=None):
             is_success = 0
 
         if table_type == SERVICES_TABLE_TYPE:
-            is_success = await service_monitor(nic, work)
+            is_success = await bounded(service_monitor(nic, work), WORK_TIMEOUT)
             if is_success:
                 print("Online -- updating uptime", status_ids)
             else:
@@ -110,20 +110,24 @@ async def worker(nic, curl, init_work=None, table_type=None):
         log_exception()
         return 0, status_ids
 
-async def process_work(nic, curl, table_type=None, stagger=False):
-    await sleep_random(100, 4000)
+# Returns whether there was any work to do.
+async def process_work(nic, curl, table_type=None, stagger=True, idle_sleep=True):
+    if stagger:
+        await sleep_random(100, 4000)
 
     # Execute work from the dealer server.
     is_success, status_ids = await worker(nic, curl, table_type=table_type)
     if is_success == NO_WORK:
-        # Between 1 - 5 mins.
-        await sleep_random(60000, 300000)
-        return
+        if idle_sleep:
+            # Between 1 - 5 mins.
+            await sleep_random(60000, 300000)
+        return False
 
     # Update statuses.
     await async_wrap_errors(
         update_work_status(curl, status_ids, is_success)
     )
+    return True
 
 async def main(nic=None):
     print("Loading interface...")
@@ -142,17 +146,34 @@ async def main(nic=None):
     to the end of it before moving to the next queue. So the queue to process
     is chosen randomly with a bias towards services.
     """
-    tables = (SERVICES_TABLE_TYPE, IMPORTS_TABLE_TYPE, ALIASES_TABLE_TYPE,)
-    weights = (3, 1, 1)
+    tables = (SERVICES_TABLE_TYPE, IMPORTS_TABLE_TYPE,)
+    weights = (3, 1)
     while 1:
-        # Re-picked every cycle. Choosing once per process meant a worker
-        # that drew the alias queue spent its whole life on that queue, and
-        # slept out its 1-5 minute backoff against it whenever it was empty.
-        table = random.choices(tables, weights=weights)[0]
         start_time = time.perf_counter()
-        await async_wrap_errors(
-            process_work(nic, curl, table_type=table)
+
+        """
+        Aliases first. They resolve the addresses that imports and services
+        are checked at, and the dealer holds back any work whose address is
+        not known yet -- so the sooner aliases are done, the sooner that work
+        can go out at all. Asking costs one local request when there is
+        none, so there is no stagger and no idle sleep on this one.
+        """
+        did_alias = await async_wrap_errors(
+            process_work(
+                nic,
+                curl,
+                table_type=ALIASES_TABLE_TYPE,
+                stagger=False,
+                idle_sleep=False
+            )
         )
+
+        if not did_alias:
+            # Re-picked every cycle, with a bias towards services.
+            table = random.choices(tables, weights=weights)[0]
+            await async_wrap_errors(
+                process_work(nic, curl, table_type=table)
+            )
 
         exec_elapsed = time.perf_counter() - start_time
         if exec_elapsed <= 0.5:

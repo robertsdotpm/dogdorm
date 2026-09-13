@@ -6,6 +6,11 @@ import os
 # Work can be handed back out after this.
 WORKER_TIMEOUT = 120
 
+# The longest a worker spends on one piece of work before giving up on it.
+# Kept under WORKER_TIMEOUT so the failure is reported before the dealer
+# hands the same work to someone else.
+WORK_TIMEOUT = WORKER_TIMEOUT - 30
+
 # Servers are checked this often.
 MONITOR_FREQUENCY = 60 * 60 * 4
 

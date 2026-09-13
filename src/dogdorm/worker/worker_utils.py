@@ -1,3 +1,4 @@
+import asyncio
 import httpx
 from p2pd import *
 from ..defs import *
@@ -293,8 +294,41 @@ Used exclusively to check servers being added as possible imports.
 This function tries to discover end points to add from those imports.
 Should any exist, otherwise, none are imported, and the work is failed.
 """
+"""
+Run one check for at most timeout seconds, and never wait longer than that.
+
+Without a bound, one server that never answers keeps a worker forever. The
+dealer re-deals unfinished work after WORKER_TIMEOUT, so the same bad server
+then swallows the next worker, and the next: on 2026-09-13 a TURN import with
+no address yet took all 100 workers in a few hours and no server was checked
+for most of a day.
+
+asyncio.wait_for is not enough on its own. On timeout it cancels the check
+and then waits for the cancellation to finish, and code that catches
+everything -- a bare except swallows CancelledError -- never finishes, so
+the worker would hang inside wait_for instead. This asks for cancellation
+and walks away. A check that ignores it lingers in the background, which is
+a leak, but a bounded one; a stuck worker is not.
+"""
+async def bounded(coro, timeout):
+    task = asyncio.ensure_future(coro)
+    done, _ = await asyncio.wait({task}, timeout=timeout)
+    if task in done:
+        return task.result()
+
+    task.cancel()
+    raise asyncio.TimeoutError("check took longer than %ss" % (timeout,))
+
 async def validate_service_import(nic, pending_insert, service_monitor):
     import_list = []
+
+    # An import named by host name has no address until its alias resolves,
+    # and the dealer should not hand one out before then. If one arrives
+    # anyway, nothing can be checked -- TURNClient given None waits forever --
+    # so fail it now rather than at the timeout.
+    if not pending_insert.get("ip"):
+        return import_list
+
     if pending_insert["type"] == STUN_MAP_TYPE:
         # This code also discovers new STUN server end points.
         # Map is just used as a generic type to signal that it's STUN.

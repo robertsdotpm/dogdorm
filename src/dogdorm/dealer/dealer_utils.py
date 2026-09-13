@@ -286,6 +286,21 @@ def allocate_work(mem_db, need_afs, table_types, cur_time, mon_freq):
                 for group_id, meta_group in wq.queues[status_type]:
                     group = meta_group.group
 
+                    """
+                    A server named by host name has no address until its
+                    alias work resolves one. Handing it out before then gives
+                    a worker nothing to check: at best the attempt is wasted,
+                    and a TURN check given no address waits forever.
+
+                    So it stays where it is -- skipped, not moved -- and goes
+                    out on the first pass after /alias fills the address in.
+                    Skipping never breaks the oldest-first ordering the
+                    breaks below rely on; it only passes over one item.
+                    """
+                    if table_choice != ALIASES_TABLE_TYPE:
+                        if any(not getattr(member, "ip", None) for member in group):
+                            continue
+
                     # Never been allocated so safe to hand out.
                     if status_type == STATUS_INIT:
                         wq.move_work(group_id, STATUS_DEALT)
