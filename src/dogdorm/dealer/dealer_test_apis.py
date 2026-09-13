@@ -60,15 +60,11 @@ async def api_sql_import():
     server_cache = build_server_list()
     return "done"
 
-@app.get("/delete_all", dependencies=[Depends(localhost_only)])
-async def api_delete_all():
-    global mem_db
-    mem_db = MemDB()
-    async with aiosqlite.connect(DB_NAME) as sqlite_db:
-        await delete_all_data(sqlite_db)
-        await sqlite_db.commit()
-
-    return "done"
+# /delete_all used to live here: a GET that replaced mem_db with an empty
+# MemDB and truncated every table in the sqlite backup. A GET should never
+# destroy anything -- a crawler, a link preview or a mistyped curl is all it
+# would have taken. Wipe the DB by stopping the dealer and moving the sqlite
+# file aside instead.
 
 @app.get("/insert_init", dependencies=[Depends(localhost_only)])
 async def api_insert_init():
