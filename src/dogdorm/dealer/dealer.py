@@ -24,6 +24,7 @@ from contextlib import asynccontextmanager
 from email.utils import formatdate, parsedate_to_datetime
 import hashlib
 import json
+import os
 from .dealer_defs import *
 from .dealer_utils import *
 from ..db.db_init import *
@@ -49,6 +50,9 @@ async def lifespan(app: FastAPI):
         insert_main(mem_db)
     except Exception:
         log_exception()
+
+    # What the world was last told, so the shrink guard survives the restart.
+    load_published_state()
 
     refresh_task = asyncio.create_task(refresh_server_cache())
 
@@ -95,6 +99,89 @@ server_list_etag = ""
 server_list_digest = ""
 server_list_modified = 0
 
+# What was last written to SERVERS_FILE, for the shrink guard below.
+published_count = 0
+published_at = 0
+
+def count_servers(cache):
+    n = 0
+    for group in cache.values():
+        if not isinstance(group, dict):
+            continue    # the timestamp field
+
+        for by_proto in group.values():
+            if not isinstance(by_proto, dict):
+                continue
+
+            for entries in by_proto.values():
+                if not isinstance(entries, list):
+                    continue
+
+                for entry in entries:
+                    n += len(entry) if isinstance(entry, list) else 1
+
+    return n
+
+"""
+Write the finished list where a web server can serve it without going near
+the dealer, so /servers keeps answering across a restart or a crash.
+
+Written to a temporary file and renamed, because rename is atomic: a reader
+either sees the whole old list or the whole new one, never half of each.
+"""
+def publish_server_list(body):
+    if not SERVERS_FILE:
+        return False
+
+    folder = os.path.dirname(SERVERS_FILE)
+    if folder and not os.path.isdir(folder):
+        return False
+
+    tmp = SERVERS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fp:
+        fp.write(body)
+        fp.flush()
+        os.fsync(fp.fileno())
+
+    # The web server runs as someone else and has to be able to read it.
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, SERVERS_FILE)
+    return True
+
+"""
+Hold back a list that just lost a big share of its servers. Groups repopulate
+over a minute or two after a restart, and publishing mid-rebuild would tell
+everyone a chunk of the fleet had vanished. After the grace period a loss is
+taken at face value -- by then it is a real one.
+"""
+def should_publish(count, now):
+    if not published_count:
+        return True
+
+    if count >= (published_count * PUBLISH_SHRINK_FLOOR):
+        return True
+
+    return (now - published_at) >= PUBLISH_SHRINK_GRACE
+
+"""
+Seed the guard from whatever is already on disk, so it knows what the world
+was last told. Without this the count resets to zero on every restart and the
+guard would happily publish the very dip it exists to hide.
+"""
+def load_published_state():
+    global published_count
+    global published_at
+    if not SERVERS_FILE or not os.path.isfile(SERVERS_FILE):
+        return
+
+    try:
+        with open(SERVERS_FILE, "r", encoding="utf-8") as fp:
+            published_count = count_servers(json.load(fp))
+
+        published_at = int(os.path.getmtime(SERVERS_FILE))
+    except Exception:
+        log_exception()
+
 # Used to backup the memory-based database to sqlite.
 async def save_all(mem_db):
     async with aiosqlite.connect(DB_NAME) as sqlite_db:
@@ -120,6 +207,8 @@ async def refresh_server_cache():
     global server_list_etag
     global server_list_digest
     global server_list_modified
+    global published_count
+    global published_at
     while True:
         try:
             server_cache = build_server_list(mem_db)
@@ -148,6 +237,17 @@ async def refresh_server_cache():
                 server_list_digest = digest
                 server_list_etag = '"%s"' % (digest,)
                 server_list_modified = int(time.time())
+
+            # Hand the list to whatever is serving it on the public port.
+            now = int(time.time())
+            count = count_servers(server_cache)
+            if should_publish(count, now):
+                if publish_server_list(server_list_str):
+                    published_count = count
+                    published_at = now
+            else:
+                log("Not publishing %d servers: last published %d, waiting "
+                    "for the list to recover." % (count, published_count))
 
             await save_all(mem_db)
         except Exception:

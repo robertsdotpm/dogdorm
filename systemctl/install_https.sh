@@ -39,6 +39,12 @@ DOMAIN="$1"
 HTTPS_PORT="${2:-8001}"
 BACKEND="${3:-127.0.0.1:8000}"
 
+# The dealer republishes the finished list here every time it rebuilds it.
+# Serving that file rather than proxying keeps /servers answering while the
+# dealer restarts, and costs the dealer nothing. Set it to "" to proxy
+# /servers like everything else.
+SERVERS_FILE="${SERVERS_FILE-/opt/dogdorm/servers.json}"
+
 if [ -z "$DOMAIN" ]; then
     echo "usage: $0 <domain> [https_port] [backend host:port]"
     exit 1
@@ -84,6 +90,26 @@ sudo tee "$LISTEN_CONF" > /dev/null <<EOF
 EOF
 sudo a2enconf -q "dogdorm-listen-$HTTPS_PORT"
 
+# Serve the published list off disk when there is one, so a dealer restart
+# does not take /servers with it. ProxyPass has to be told to leave that path
+# alone, or it would win over the Alias.
+SERVE_LIST=""
+if [ -n "$SERVERS_FILE" ]; then
+    SERVERS_DIR=$(dirname "$SERVERS_FILE")
+    SERVERS_NAME=$(basename "$SERVERS_FILE")
+    SERVE_LIST=$(cat <<EOF
+
+    ProxyPass /servers !
+    Alias /servers $SERVERS_FILE
+    <Directory "$SERVERS_DIR">
+        <Files "$SERVERS_NAME">
+            Require all granted
+        </Files>
+    </Directory>
+EOF
+)
+fi
+
 echo "Creating vhost for $DOMAIN${ALIASES:+ (also serving: $ALIASES)}..."
 sudo tee "$SITE_FILE" > /dev/null <<EOF
 # Added by dogdorm's install_https.sh. HTTPS front end for the dealer, which
@@ -118,6 +144,7 @@ ${ALIASES:+    ServerAlias $ALIASES}
         Require all granted
     </LocationMatch>
 
+$SERVE_LIST
     ProxyPreserveHost Off
     ProxyPass / http://$BACKEND/
     ProxyPassReverse / http://$BACKEND/

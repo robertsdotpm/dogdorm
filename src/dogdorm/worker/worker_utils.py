@@ -214,7 +214,7 @@ async def stun_server_classifier(af, ip, port, nic):
 
 # Will just have workers wait until success.
 async def retry_curl_on_locked(curl, params, endpoint, retries=3):
-    url = "http://localhost:8000" + endpoint
+    url = "http://%s:%d%s" % (DEALER_HOST, DEALER_PORT, endpoint)
     async with httpx.AsyncClient() as client:
         while retries is None or retries > 0:
             # Decrement sentinel.

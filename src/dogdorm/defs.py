@@ -15,6 +15,39 @@ MAX_SERVER_DOWNTIME = 600
 # Try to import items 3 times then stop.
 IMPORT_TEST_NO = 3 
 
+"""
+Where the dealer listens, and where the workers look for it.
+
+The bind host defaults to every interface, which is what a plain install
+wants. A deployment that puts a web server in front of the dealer sets
+DOGDORM_DEALER_BIND_HOST=127.0.0.1 and moves the port, so the only thing on
+the public port is the web server -- which can then serve the published list
+off disk whether the dealer is up or not.
+"""
+DEALER_BIND_HOST = os.environ.get("DOGDORM_DEALER_BIND_HOST", "*")
+DEALER_HOST = os.environ.get("DOGDORM_DEALER_HOST", "127.0.0.1")
+DEALER_PORT = int(os.environ.get("DOGDORM_DEALER_PORT", "8000"))
+
+"""
+The dealer writes the finished server list here every time it rebuilds it,
+so a web server can serve that file directly. The point is that /servers then
+does not depend on the dealer being alive: it survives a restart, and a crash.
+
+Set to "" to turn publishing off.
+"""
+SERVERS_FILE = os.environ.get("DOGDORM_SERVERS_FILE", "/opt/dogdorm/servers.json")
+
+"""
+Groups repopulate over a minute or two after a restart, so a freshly built
+list can briefly be missing a chunk of its servers -- on the P2PD monitor it
+dipped from 948 to 826 before recovering. Publishing that would advertise
+fewer servers than really exist, so a list that lost more than this fraction
+of the last published one is held back until the grace period is up, by which
+point a real loss is real.
+"""
+PUBLISH_SHRINK_FLOOR = 0.9
+PUBLISH_SHRINK_GRACE = 20 * 60
+
 # A monitored server that has not answered for this long is dead rather than
 # flaky, so it stops being handed out as work. At MONITOR_FREQUENCY that is
 # around 84 consecutive failures before anything is retired.

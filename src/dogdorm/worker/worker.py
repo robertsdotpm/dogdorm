@@ -111,7 +111,7 @@ async def main(nic=None):
     # Workers start randomly over the next min to avoid traffic surges.
     #await sleep_random(1000, 60000)
 
-    endpoint = ("127.0.0.1", 8000,)
+    endpoint = (DEALER_HOST, DEALER_PORT,)
     route = nic.route(IP4)
     curl = WebCurl(endpoint, route)
 

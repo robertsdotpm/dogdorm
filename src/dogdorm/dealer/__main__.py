@@ -6,8 +6,8 @@ for name in ("httpx", "httpcore", "aiosqlite", "sqlite3", "core"):
 
 uvicorn.run(
     app,
-    host="*",
-    port=8000,
+    host=DEALER_BIND_HOST,
+    port=DEALER_PORT,
     reload=False,
     log_level="warning"
 )
