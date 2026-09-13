@@ -21,6 +21,8 @@ from p2pd import *
 from typing import List
 from pprint import pformat
 from contextlib import asynccontextmanager
+from email.utils import formatdate, parsedate_to_datetime
+import hashlib
 import json
 from .dealer_defs import *
 from .dealer_utils import *
@@ -87,6 +89,12 @@ server_cache = {}
 server_list_str = ""
 refresh_task = None
 
+# Validators for /servers, so a client that polls can be told "unchanged"
+# instead of being sent the whole list again.
+server_list_etag = ""
+server_list_digest = ""
+server_list_modified = 0
+
 # Used to backup the memory-based database to sqlite.
 async def save_all(mem_db):
     async with aiosqlite.connect(DB_NAME) as sqlite_db:
@@ -109,6 +117,9 @@ async def refresh_server_cache():
     global server_list_str
     global server_cache
     global mem_db
+    global server_list_etag
+    global server_list_digest
+    global server_list_modified
     while True:
         try:
             server_cache = build_server_list(mem_db)
@@ -118,6 +129,25 @@ async def refresh_server_cache():
                 sort_keys=False,
                 default=str
             )
+
+            """
+            The digest covers the servers, not the build time. The timestamp
+            field changes every time this loop runs, so hashing the body as
+            sent would hand out a new ETag every minute and no client would
+            ever get a 304 -- which is the entire point of having one.
+            """
+            digest = hashlib.sha256(
+                json.dumps(
+                    {k: v for k, v in server_cache.items() if k != "timestamp"},
+                    sort_keys=False,
+                    default=str
+                ).encode()
+            ).hexdigest()[:32]
+
+            if digest != server_list_digest:
+                server_list_digest = digest
+                server_list_etag = '"%s"' % (digest,)
+                server_list_modified = int(time.time())
 
             await save_all(mem_db)
         except Exception:
@@ -131,6 +161,12 @@ async def refresh_server_cache():
 @app.middleware("http")
 async def no_cache_middleware(request: Request, call_next):
     response: Response = await call_next(request)
+
+    # A handler that set its own caching rules knows better than this does;
+    # /servers wants to be revalidated, not refetched.
+    if "Cache-Control" in response.headers:
+        return response
+
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
@@ -256,11 +292,52 @@ async def api_index():
 
     return PlainTextResponse("dogdorm dealer. The server list is at /servers\n")
 
-# Show a listing of servers based on quality
-# Only public API is this one.
+"""
+Show a listing of servers based on quality. The only public API is this one.
+
+The list is most of a megabyte and only really changes when a check changes a
+server's standing, which is hours apart -- so it is served with validators and
+answers a conditional request with 304 instead of the body. A client that
+sends no conditional header is unaffected and gets the full list as before.
+"""
+def not_modified(request: Request):
+    if not server_list_etag:
+        return False
+
+    # An exact match is all we ever issue, but be tolerant of a list.
+    inm = request.headers.get("if-none-match")
+    if inm:
+        return server_list_etag in [tag.strip() for tag in inm.split(",")]
+
+    ims = request.headers.get("if-modified-since")
+    if ims and server_list_modified:
+        try:
+            since = parsedate_to_datetime(ims).timestamp()
+        except Exception:
+            return False
+
+        # Last-Modified only has second resolution, so this compares equal
+        # for a client that echoes back exactly what we sent.
+        return server_list_modified <= since
+
+    return False
+
 @app.get("/servers")
-async def api_list_servers():
-    return Response(content=server_list_str, media_type="application/json")
+async def api_list_servers(request: Request):
+    headers = {"Cache-Control": "public, max-age=0, must-revalidate"}
+    if server_list_etag:
+        headers["ETag"] = server_list_etag
+    if server_list_modified:
+        headers["Last-Modified"] = formatdate(server_list_modified, usegmt=True)
+
+    if not_modified(request):
+        return Response(status_code=304, headers=headers)
+
+    return Response(
+        content=server_list_str,
+        media_type="application/json",
+        headers=headers
+    )
 
 @app.get("/legacy", response_class=PlainTextResponse)
 def api_list_p2pd_settings_legacy():

@@ -186,6 +186,20 @@ Used by the server to indicate that work handed out has been "done"
 and they are updating the status of the result.
 Work jobs may succeed or fail.
 """
+"""
+A server that has not answered for RETIRE_AFTER is not flaky, it is gone.
+Leaving it in rotation spends a check on it every MONITOR_FREQUENCY forever,
+which is traffic aimed at someone else's infrastructure for no reason. The
+decision is made on the status row we already keep: when it last answered, or
+failing that, how many times we have asked.
+"""
+def is_retired(status, t):
+    if status.last_success:
+        return (t - status.last_success) > RETIRE_AFTER
+
+    # Never answered once. Judge it on how many attempts it has had.
+    return status.test_no >= RETIRE_NEVER_AFTER_TESTS
+
 def mark_complete(mem_db, is_success: int, status_id: int, t=None):
     # Work starts out with the target of being reassigned available.
     t = t or int(time.time())
@@ -193,23 +207,13 @@ def mark_complete(mem_db, is_success: int, status_id: int, t=None):
     if status_id not in mem_db.statuses:
         raise KeyError("could not load status row %s" % (status_id,))
     
-    # Delete target row if status is for an imports.
-    # We only want imports work to be done once.
     status = mem_db.statuses[status_id]
     table_type = status.table_type
-    if table_type == IMPORTS_TABLE_TYPE:
-        if status.test_no >= IMPORT_TEST_NO:
-            status_type = STATUS_DISABLED
-        if is_success:
-            status_type = STATUS_DISABLED
 
     # Remove from dealt queue.
     record = mem_db.records[table_type][status.row_id]
     af = record.af
     group_id = record.group_id
-
-    # Try to move work to available -- throw exception if not exist.
-    mem_db.work[table_type][af].move_work(group_id, status_type)
 
     # Update stats for success.
     if is_success:
@@ -229,12 +233,31 @@ def mark_complete(mem_db, is_success: int, status_id: int, t=None):
     if not is_success:
         status.failed_tests += 1
         status.uptime = 0
-    
-    # Update work with the new status and increase
-    # How many times its been executed.
-    status.status = status_type
+
     status.test_no += 1
     status.last_status = t
+
+    """
+    Where the work goes next, decided on the stats as they now stand.
+
+    Imports are one-shot: a success means there is nothing left to import,
+    and enough failures mean it was never going to work.
+    """
+    if table_type == IMPORTS_TABLE_TYPE:
+        if is_success or status.test_no >= IMPORT_TEST_NO:
+            status_type = STATUS_DISABLED
+
+    # A service or alias that has stopped answering for long enough is
+    # retired rather than checked forever.
+    if table_type != IMPORTS_TABLE_TYPE:
+        if not is_success and is_retired(status, t):
+            status_type = STATUS_DISABLED
+
+    # Try to move work to available -- throw exception if not exist.
+    mem_db.work[table_type][af].move_work(group_id, status_type)
+
+    # Update work with the new status.
+    status.status = status_type
 
 """
 The server uses this code to hand out jobs or work to the workers.

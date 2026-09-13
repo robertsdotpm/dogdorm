@@ -15,6 +15,15 @@ MAX_SERVER_DOWNTIME = 600
 # Try to import items 3 times then stop.
 IMPORT_TEST_NO = 3 
 
+# A monitored server that has not answered for this long is dead rather than
+# flaky, so it stops being handed out as work. At MONITOR_FREQUENCY that is
+# around 84 consecutive failures before anything is retired.
+RETIRE_AFTER = 14 * 24 * 60 * 60
+
+# One that has never answered at all has no last_success to measure from, so
+# it is retired on how many times we have tried instead.
+RETIRE_NEVER_AFTER_TESTS = 20
+
 # Where a browser landing on "/" gets sent. What the dealer serves is JSON
 # meant for other programs; the dashboard is the readable view of the same
 # data. Set it to "" to leave "/" alone, or point it at your own page.
