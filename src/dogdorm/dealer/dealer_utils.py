@@ -330,6 +330,16 @@ def update_table_ip(mem_db, table_type: int, ip: str, alias_id: int, current_tim
         if cond_one or cond_two:
             record.ip = ip
 
+# A group's hostname comes off its first member. Written out because the
+# three loops below used to read a leftover "entry" from the STUN loop above
+# them, which put a STUN server's name on every MQTT and TURN entry.
+def group_host(group):
+    if not group:
+        return None
+
+    fqns = group[0].get("fqns")
+    return fqns[0] if fqns else None
+
 def gen_p2pd_legacy_settings(server_cache):
     map_servers = {
         "UDP": { "IPv4": [], "IPv6": [] },
@@ -371,11 +381,11 @@ def gen_p2pd_legacy_settings(server_cache):
     for af in server_cache["STUN(test_nat)"]:
         for proto in server_cache["STUN(test_nat)"][af]:
             for group in server_cache["STUN(test_nat)"][af][proto]:
-                if entry["fqns"]:
-                    host = entry["fqns"][0]
-                else:
-                    host = None
+                # RFC 3489 needs all four servers; a short group is unusable.
+                if len(group) < 4:
+                    continue
 
+                host = group_host(group)
                 server = {
                     "mode": 1,
                     "primary": {
@@ -395,11 +405,7 @@ def gen_p2pd_legacy_settings(server_cache):
     for af in server_cache["MQTT"]:
         for proto in server_cache["MQTT"][af]:
             for group in server_cache["MQTT"][af][proto]:
-                if entry["fqns"]:
-                    host = entry["fqns"][0]
-                else:
-                    host = None
-
+                host = group_host(group)
                 rid = group[0]["id"]
                 if rid not in mqtt_servers:
                     mqtt_servers[rid] = {}
@@ -425,11 +431,7 @@ def gen_p2pd_legacy_settings(server_cache):
     for af in server_cache["TURN"]:
         for proto in server_cache["TURN"][af]:
             for group in server_cache["TURN"][af][proto]:
-                if entry["fqns"]:
-                    host = entry["fqns"][0]
-                else:
-                    host = None
-
+                host = group_host(group)
                 rid = group[0]["id"]
                 if rid not in turn_servers:
                     turn_servers[rid] = {}

@@ -10,12 +10,12 @@ from fastapi import Depends
 from ..defs import *
 from .dealer_utils import *
 
-@app.get("/list_groups")
+@app.get("/list_groups", dependencies=[Depends(localhost_only)])
 async def api_list_groups():
     return mem_db.groups
 
-@app.get("/list_records")
-async def api_list_groups():
+@app.get("/list_records", dependencies=[Depends(localhost_only)])
+async def api_list_records():
     return mem_db.records
     
 @app.get("/concurrency_test", dependencies=[Depends(localhost_only)])
@@ -38,11 +38,11 @@ async def api_concurrency_test():
 
     print("All aliases processed.")
 
-@app.get("/list_aliases_len")
+@app.get("/list_aliases_len", dependencies=[Depends(localhost_only)])
 async def api_aliases_len():
     return len(mem_db.records[ALIASES_TABLE_TYPE])
 
-@app.get("/list_aliases")
+@app.get("/list_aliases", dependencies=[Depends(localhost_only)])
 async def api_list_aliases():
     return mem_db.records[ALIASES_TABLE_TYPE]
 
