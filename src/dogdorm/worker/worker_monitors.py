@@ -158,8 +158,17 @@ synchronize TCP hole punching in P2PD.
 """
 async def monitor_ntp_type(nic, work):
     try:
-        # Resolved to the server address.
+        """
+        p2pd's get_ntp looks the server up by address family -- server[af] is
+        the address to query -- and only falls back to "host" when that entry
+        is empty. This used to pass only host and port, so get_ntp raised
+        KeyError on the missing family, the except below turned that into a
+        failure, and no NTP check had ever actually been made. A bug in the
+        worker's reporting hid it by recording every check as a success.
+        """
+        af = work[0]["af"]
         server = {
+            af: work[0]["ip"],
             "host": work[0]["ip"],
             "port": work[0]["port"]
         }
