@@ -107,6 +107,13 @@ def build_server_list(mem_db):
             if meta_group.table_type != SERVICES_TABLE_TYPE:
                 continue
 
+            # Retired servers are not published: a list of servers to use
+            # should not lead with ones that stopped answering weeks ago.
+            # They are still checked weekly and reappear once they answer.
+            queued = mem_db.work[SERVICES_TABLE_TYPE][meta_group.af].index.get(group_id)
+            if queued and queued[0] == STATUS_DISABLED:
+                continue
+
             # Avoid local IPs.
             group = list_x_to_dict(meta_group.group)
             localhosts = ("127.0.0.1", "0000:0000:0000:0000:0000:0000:0000:0001",)
@@ -294,7 +301,14 @@ def allocate_work(mem_db, need_afs, table_types, cur_time, mon_freq):
             checks then we know that later items in the queue are also too recent.
             """
             wq = mem_db.work[table_choice][need_af]
-            for status_type in (STATUS_INIT, STATUS_AVAILABLE, STATUS_DEALT,):
+
+            # Retired work is tried again after RETIRED_RECHECK, last of all.
+            # Imports are left alone: disabled is where they go when done.
+            queues = (STATUS_INIT, STATUS_AVAILABLE, STATUS_DEALT,)
+            if table_choice != IMPORTS_TABLE_TYPE:
+                queues += (STATUS_DISABLED,)
+
+            for status_type in queues:
                 for group_id, meta_group in wq.queues[status_type]:
                     group = meta_group.group
 
@@ -325,8 +339,13 @@ def allocate_work(mem_db, need_afs, table_types, cur_time, mon_freq):
 
                     # In time order with oldest first.
                     # So if this isn't old enough then none are.
-                    if status_type != STATUS_DEALT:
+                    if status_type == STATUS_AVAILABLE:
                         if elapsed < mon_freq:
+                            break
+
+                    # Retired: only once a week.
+                    if status_type == STATUS_DISABLED:
+                        if elapsed < RETIRED_RECHECK:
                             break
 
                     # Check for worker timeout.

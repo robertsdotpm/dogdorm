@@ -40,7 +40,6 @@ CREATE TABLE IF NOT EXISTS "services" (
 	"password"	TEXT DEFAULT NULL,
 	"alias_id"	INTEGER DEFAULT NULL,
 	"table_type"	INTEGER DEFAULT 14,
-	UNIQUE("type","af","proto","ip","port"),
 	PRIMARY KEY("id"),
 	FOREIGN KEY("alias_id") REFERENCES "aliases"("id")
 );
@@ -58,7 +57,6 @@ CREATE TABLE IF NOT EXISTS "imports" (
 	"proto"	INTEGER DEFAULT NULL,
 	""	INTEGER,
 	PRIMARY KEY("id"),
-	FOREIGN KEY("alias_id") REFERENCES "aliases"("id"),
-	UNIQUE("type","af","ip","port")
+	FOREIGN KEY("alias_id") REFERENCES "aliases"("id")
 );
 COMMIT;

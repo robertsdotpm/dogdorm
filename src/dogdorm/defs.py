@@ -73,6 +73,15 @@ RETIRE_AFTER = 14 * 24 * 60 * 60
 # it is retired on how many times we have tried instead.
 RETIRE_NEVER_AFTER_TESTS = 20
 
+"""
+A retired server is left out of the published list and not checked every
+MONITOR_FREQUENCY -- but not given up on either. It is tried again this often;
+if it answers it goes straight back into rotation and back into the list,
+and if not it waits for the next try. Imports are not included: an import is
+disabled because it is finished, not because it went quiet.
+"""
+RETIRED_RECHECK = 7 * 24 * 60 * 60
+
 # Where a browser landing on "/" gets sent. What the dealer serves is JSON
 # meant for other programs; the dashboard is the readable view of the same
 # data. Set it to "" to leave "/" alone, or point it at your own page.
